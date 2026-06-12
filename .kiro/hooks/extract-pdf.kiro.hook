@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "name": "Extract PDFs",
+  "description": "When a PDF is added anywhere in the vault, prompts agent to extract text to markdown for searchability",
+  "version": "1",
+  "when": {
+    "type": "fileCreated",
+    "patterns": [
+      "**/*.pdf"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A new PDF was added. Use the `convert-pdf-to-md` skill to extract its text to markdown, placing the output alongside the PDF."
+  }
+}

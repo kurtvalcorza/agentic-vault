@@ -1,0 +1,152 @@
+# =====================================================================
+# Vault .gitignore  —  scope: NOTES + CONFIG ONLY
+# Tracks markdown notes and small text config.
+# Ignores secrets, caches, nested git repos, and large binaries.
+# =====================================================================
+
+# ---------------------------------------------------------------------
+# Secrets — NEVER commit
+# ---------------------------------------------------------------------
+.env
+.env.*
+*.env
+**/.env
+**/.env.*
+mcp.json
+.mcp.json
+**/mcp.json
+**/.mcp.json
+*.key
+*.pem
+*.pfx
+*.p12
+id_rsa*
+**/secrets/
+**/*credential*
+**/*secret*.json
+**/*token*.json
+# Obsidian Local REST API plugin stores its apiKey + TLS private key here
+.obsidian/plugins/obsidian-local-rest-api/data.json
+
+# ---------------------------------------------------------------------
+# OS / system cruft
+# ---------------------------------------------------------------------
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+.Spotlight-V100
+.Trashes
+
+# ---------------------------------------------------------------------
+# Cloud-sync scratch (if the vault lives in a synced folder)
+# ---------------------------------------------------------------------
+.tmp.driveupload/
+.tmp.drivedownload/
+
+# ---------------------------------------------------------------------
+# Tooling / language caches
+# ---------------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.pyc
+.hypothesis/
+.pytest_cache/
+.ipynb_checkpoints/
+node_modules/
+
+# ---------------------------------------------------------------------
+# Obsidian local state (keep config; drop volatile workspace + caches)
+# ---------------------------------------------------------------------
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache
+.trash/
+.smart-env/
+
+# ---------------------------------------------------------------------
+# Agent skills junctions (created by setup.ps1 — canonical copy lives in
+# .agent/skills/; git on Windows recurses into junctions as plain
+# directories, which would commit duplicate copies of every skill)
+# ---------------------------------------------------------------------
+.claude/skills/
+.codex/skills/
+.kiro/skills/
+.gemini/skills/
+
+# ---------------------------------------------------------------------
+# Nested git repositories (add yours here — they version themselves)
+# ---------------------------------------------------------------------
+# 02_Areas/Tools/some-cloned-repo/
+
+# ---------------------------------------------------------------------
+# Attachments & large binaries (notes-only scope)
+# ---------------------------------------------------------------------
+# Images
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tif
+*.tiff
+*.webp
+*.ico
+*.heic
+# Vector / design
+*.svg
+*.psd
+*.ai
+*.sketch
+# Documents
+*.pdf
+*.doc
+*.docx
+*.ppt
+*.pptx
+*.xls
+*.xlsx
+*.odt
+*.epub
+*.mobi
+# Audio / video
+*.mp3
+*.wav
+*.m4a
+*.flac
+*.aac
+*.ogg
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.wmv
+# Archives
+*.zip
+*.tar
+*.gz
+*.tgz
+*.bz2
+*.7z
+*.rar
+# Data / model blobs
+*.parquet
+*.feather
+*.npy
+*.npz
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+*.safetensors
+*.bin
+*.onnx
+# Executables / libraries
+*.exe
+*.dll
+*.so
+*.dylib
+*.msi

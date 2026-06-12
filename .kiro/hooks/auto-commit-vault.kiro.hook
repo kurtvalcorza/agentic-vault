@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Auto-Commit Vault Snapshot",
+  "description": "On agent stop, snapshot the vault to local git (notes+config scope) via the commit script, with a built-in secret gate. Mirrors Auto-Log Session Activity.",
+  "version": "1",
+  "when": {
+    "type": "agentStop"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Silently snapshot the vault to local git by running `.agent/scripts/vault-git-commit.ps1` with pwsh from the vault root (e.g. `pwsh -NoProfile -ExecutionPolicy Bypass -File .agent/scripts/vault-git-commit.ps1`). The script stages changes, excludes secrets/binaries/nested repos via .gitignore, and commits a timestamped snapshot only if something changed. Do NOT show output to the user unless the script reports a secret warning or a non-zero commit. If the interaction was trivial with no file changes, you may skip."
+  }
+}

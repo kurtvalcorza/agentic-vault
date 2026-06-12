@@ -1,0 +1,12 @@
+{
+  "name": "Documentation Spell Check",
+  "version": "1.0.0",
+  "description": "Review spelling, grammar, and formatting in skill READMEs, steering docs, and project documentation",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Review and fix spelling and grammar in the current file or recently modified documentation. Please:\n1. Identify spelling errors, grammar issues, and typos\n2. Fix obvious errors while preserving original meaning and tone\n3. Ensure consistent formatting (Markdown headings, lists, code blocks)\n4. Verify WikiLinks are properly formatted ([[Note Name]])\n5. Check that YAML frontmatter is valid and complete\n6. Flag any broken links or references\n7. Preserve institutional tone for project/area docs, casual tone for personal notes\n8. Present changes as suggestions — do not auto-apply without confirmation"
+  }
+}

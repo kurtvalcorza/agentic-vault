@@ -1,0 +1,12 @@
+{
+  "name": "Commit Message Helper",
+  "version": "1.0.0",
+  "description": "Generate conventional commit messages for vault-embedded git repos (.agent/skills, 02_Areas/Skills, etc.)",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Help generate a conventional commit message for the current git changes. Please:\n1. Analyze the current git diff to understand what changed\n2. Determine the commit type (feat, fix, docs, refactor, chore)\n3. Identify the scope (e.g., skill/name, script, steering, vault)\n4. Generate a concise message in conventional commit format (under 50 chars first line, imperative mood)\n5. If there are multiple logical changes, suggest splitting into separate commits\n6. Present the message and ask if the user wants to use it\n7. Watch for accidental PII or secrets in the diff — flag them before committing"
+  }
+}

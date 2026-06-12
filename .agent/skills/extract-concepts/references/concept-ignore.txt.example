@@ -1,0 +1,13 @@
+# Concept Ignore List — Example
+#
+# This is an example of the concept-ignore.txt file.
+# The actual ignore list lives at: .agent/concept-ignore.txt
+#
+# Format: one concept per line (case-insensitive matching)
+# Lines starting with # are comments
+# Blank lines are ignored
+#
+# Example entries:
+# machine learning
+# artificial intelligence
+# data science

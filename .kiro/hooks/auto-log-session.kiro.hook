@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Auto-Log Session Activity",
+  "description": "Automatically create a new session log file in today's folder when agent stops, tracking files changed and outputs created",
+  "version": "1",
+  "when": {
+    "type": "agentStop"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Silently create a new log file in System/session-logs/YYYY-MM-DD/ folder with filename HH-MM-SS_brief-task-description.md. Include: timestamp, files modified, outputs created, and inferred task. Keep it concise (2-3 lines). If this was a trivial interaction, skip logging. Do not show the log entry to user unless they ask."
+  }
+}

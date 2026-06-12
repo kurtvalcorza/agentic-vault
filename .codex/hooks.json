@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh -NoProfile -ExecutionPolicy Bypass -Command \"`$root = git rev-parse --show-toplevel; & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path `$root '.codex/hooks/vault-git-commit-stop.ps1')\"",
+            "commandWindows": "pwsh -NoProfile -ExecutionPolicy Bypass -Command \"`$root = git rev-parse --show-toplevel; & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path `$root '.codex/hooks/vault-git-commit-stop.ps1')\"",
+            "timeout": 120,
+            "statusMessage": "Logging session and snapshotting vault"
+          }
+        ]
+      }
+    ]
+  }
+}
