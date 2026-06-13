@@ -1,7 +1,7 @@
 # Gemini CLI: Vault Instructions
 
 > **Source of Truth:** This file is a **derived digest** of [[AGENTS.md]]. Refer to [[AGENTS.md]] for the canonical version of all protocols. If anything here conflicts with AGENTS.md, AGENTS.md wins.
-> **Synced with AGENTS.md version:** 1.0
+> **Synced with AGENTS.md version:** 1.1
 
 ## Project Overview
 This is the personal knowledge management (PKM) vault of **{{OWNER_NAME}}**. It uses a **Hybrid PARA + Zettelkasten** structure to organize projects, long-term knowledge, and references.
@@ -34,7 +34,7 @@ This is the personal knowledge management (PKM) vault of **{{OWNER_NAME}}**. It 
 
 ### 5. Security & Standards
 - **PII/Secrets**: Never store API keys or unmasked PII in markdown notes.
-- **Tone**: Professional for `01_Projects/`, `02_Areas/`, `03_Resources/`, `.agent/outputs/`; casual for `Inbox/` and personal notes.
+- **Tone**: Professional for `01_Projects/`, `02_Areas/`, `03_Resources/`, `.agent/outputs/`; casual for `Inbox/` and personal notes. House voice → `.agent/steering/voice.md`; what to avoid → `.agent/steering/anti-style.md`.
 
 ## Key Directories
 - **`.agent/`**: Shared write space for agent outputs, skills, scripts, steering, and registries. The ONLY shared write space — other agents' config dirs are read-only.

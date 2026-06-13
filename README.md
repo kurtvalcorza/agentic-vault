@@ -33,7 +33,7 @@ flowchart TB
 
     AGENTS["<b>AGENTS.md — Universal Source of Truth</b><br/>core protocols bind all agents · per-agent configs override preferences only<br/>CLAUDE.md → @AGENTS.md import · GEMINI.md → versioned digest"]:::gov
 
-    WORKSPACE["<b>.agent/ — Shared Workspace</b><br/>skills/ — 36 skills, one canonical dir, junctions<br/>steering/ — 11 convention docs, read on demand<br/>scripts/ — automation · SKILLS-REGISTRY · TOOL-TAXONOMY"]:::space
+    WORKSPACE["<b>.agent/ — Shared Workspace</b><br/>skills/ — 36 skills, one canonical dir, junctions<br/>steering/ — 13 convention docs, read on demand<br/>scripts/ — automation · SKILLS-REGISTRY · TOOL-TAXONOMY"]:::space
 
     CONTENT["<b>Vault Content — PARA</b><br/>Inbox/ — capture → triage<br/>01_Projects/ — active work + Kanban board<br/>02_Areas/ — long-term knowledge<br/>03_Resources/ — references + Source Catalog<br/>04_Archives/ — retired work"]:::space
 
@@ -64,7 +64,7 @@ flowchart TB
 | **`AGENTS.md`** | The constitution: directory contracts, operational protocols, conflict-resolution table, steering priority. Agent-specific configs may override *preferences*, never *protocols*. |
 | **`CLAUDE.md` / `GEMINI.md`** | Claude imports AGENTS.md directly; Gemini gets a version-marked digest. `sync-agents.ps1` detects drift. |
 | **36 agent skills** (`.agent/skills/`) | Reusable workflows any agent can run: inbox triage, atomic note creation, vault Q&A, wiki compilation, concept extraction, contradiction reconciliation, document conversion, media transcription, skill validation, security audit, and more. One canonical directory; every agent's `skills/` is a junction to it. |
-| **11 steering docs** (`.agent/steering/`) | Conventions read on-demand, not preloaded: skills standard, file naming, tag taxonomy, security practices, session continuity, bi-temporal fact tracking, the two-output rule. |
+| **13 steering docs** (`.agent/steering/`) | Conventions read on-demand, not preloaded: skills standard, file naming, tag taxonomy, security practices, session continuity, bi-temporal fact tracking, the two-output rule, plus house voice and anti-style. |
 | **`TOOL-TAXONOMY.md`** | Generic capability names (`file-read`, `content-search`) so skills stay portable across agents. |
 | **Automation scripts** (`.agent/scripts/`) | `vault-git-commit.ps1` (secret-gated auto-snapshot), `vault-session-log.ps1` (deterministic session logs), `vault-git-bundle.ps1` (monthly off-root history backup), `sync-agents.ps1` (governance drift check), `purge-desktop-ini.ps1`. |
 | **Hooks for 3 harnesses** | Claude Code `SessionEnd`, Codex `Stop`, Kiro `agentStop` — all converge on: write session log → snapshot vault to git → (monthly) bundle history off-root. |
@@ -119,7 +119,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File setup.ps1
 │   └── memory/                           glossary, people, projects
 ├── .agent/                               shared agent workspace
 │   ├── skills/        36 skills (canonical)
-│   ├── steering/      11 convention docs
+│   ├── steering/      13 convention docs
 │   ├── scripts/       automation
 │   ├── outputs/       agent deliverables
 │   ├── SKILLS-REGISTRY.md

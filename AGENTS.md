@@ -25,7 +25,7 @@ The two systems complement each other: PARA answers *"where does this live?"* wh
 
 *   **Owner**: **{{OWNER_NAME}}**, {{ROLE / WHAT YOU DO}}.
 *   **Focus**: {{YOUR KEY PROJECTS AND TOPICS}}.
-*   **Tone**: Professional for `01_Projects/`, `02_Areas/`, `03_Resources/`, and `.agent/outputs/`. Casual/Personal for `Inbox/` captures and personal notes. Session logs (`System/session-logs/`) are neutral/factual.
+*   **Tone**: Professional for `01_Projects/`, `02_Areas/`, `03_Resources/`, and `.agent/outputs/` — house voice in `.agent/steering/voice.md`, what to avoid in `.agent/steering/anti-style.md`. Casual/Personal for `Inbox/` captures and personal notes. Session logs (`System/session-logs/`) are neutral/factual.
 
 ### Workflow Pattern
 ```
@@ -97,6 +97,14 @@ The vault's live work queue is the Obsidian Kanban board at [[01_Projects/To Do]
 - **Skills-First Protocol**: Always check `.agent/skills/` and `.agent/SKILLS-REGISTRY.md` before implementing manually. If no matching skill exists, proceed with the task directly — do not block on skill absence.
 - Common triggers: "write a note", "synthesize research", "compile my sources into a wiki", "what do my notes say about X?", "clip this article", "find recurring concepts"
 
+## Voice & Anti-Style
+
+> **Extracted:** House voice in `.agent/steering/voice.md`; banned vocabulary and structural anti-patterns in `.agent/steering/anti-style.md`.
+
+- **Voice** is your institutional *output* voice — most professional writing is ghostwritten for a team, org, or principal, not a personal voice. Impact-first, number-anchored, plain-language, active "we"; calibrate to audience.
+- **Anti-style** is the always-on default: no hype ("groundbreaking", "revolutionary"), no AI-tells ("delve", "it's important to note"), no buried leads, no unexplained jargon, no fabricated metrics. Keep a short allowlist of legitimate domain terms so they aren't flagged.
+- Apply both when drafting any external-facing or substantial deliverable; run the anti-style pre-send test before declaring a draft done.
+
 ## Script Execution & Quality Assurance
 
 > **Extracted:** Full detail in `.agent/steering/scripts-and-qa.md`
@@ -131,7 +139,7 @@ Not all steering files need to be read on every session. Priority levels:
 | Priority | When to read | Files |
 | :--- | :--- | :--- |
 | **Always** | Every session, before any work | `AGENTS.md` (this file), today's session log, `memory-hot-cache.md` |
-| **On relevant action** | Before performing the matching action | `skills-standard.md` (creating/editing skills), `file-naming-conventions.md` (creating files), `tag-taxonomy.md` (applying tags), `security-best-practices.md` (external integrations), `session-continuity.md` (logging), `bi-temporal-tracking.md` (updating entity frontmatter: `role`, `status`, `company`, `affiliation`), `two-output-rule.md` (invoking a skill with `two_output: true`) |
+| **On relevant action** | Before performing the matching action | `skills-standard.md` (creating/editing skills), `file-naming-conventions.md` (creating files), `tag-taxonomy.md` (applying tags), `security-best-practices.md` (external integrations), `session-continuity.md` (logging), `bi-temporal-tracking.md` (updating entity frontmatter: `role`, `status`, `company`, `affiliation`), `two-output-rule.md` (invoking a skill with `two_output: true`), `voice.md` + `anti-style.md` (drafting any external-facing or substantial output) |
 | **On first encounter** | First time in a session the topic arises | `conversational-interface.md`, `scripts-and-qa.md`, `kiro-integration.md` |
 
 Agents SHOULD NOT preload all steering files at session start. Read them when the action demands it.
@@ -183,4 +191,4 @@ The vault root is a **local git repository** (no remote) — a version history a
 - Full glossary: `System/memory/glossary.md` | Profiles: `System/memory/people/` | Projects: `System/memory/projects/`
 
 ---
-**Last Updated:** {{DATE}} | **Version:** 1.0 (Template release)
+**Last Updated:** {{DATE}} | **Version:** 1.1 (Added Voice & Anti-Style steering — `voice.md` (house output voice) and `anti-style.md` (banned hype/AI-tells, structural anti-patterns, pre-send test), read on relevant action when drafting)
