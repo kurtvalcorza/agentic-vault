@@ -1,7 +1,7 @@
 # Gemini CLI: Vault Instructions
 
 > **Source of Truth:** This file is a **derived digest** of [[AGENTS.md]]. Refer to [[AGENTS.md]] for the canonical version of all protocols. If anything here conflicts with AGENTS.md, AGENTS.md wins.
-> **Synced with AGENTS.md version:** 1.2
+> **Synced with AGENTS.md version:** 1.3
 
 ## Project Overview
 This is the personal knowledge management (PKM) vault of **{{OWNER_NAME}}**. It uses a **Hybrid PARA + Zettelkasten** structure to organize projects, long-term knowledge, and references.
@@ -22,6 +22,7 @@ This is the personal knowledge management (PKM) vault of **{{OWNER_NAME}}**. It 
 
 ### 3. Session & Tooling
 - **Skills First**: Check `.agent/skills/` and `.agent/SKILLS-REGISTRY.md` before manual implementation. If no matching skill exists, proceed directly — do not block.
+- **Operating Method (Ultramode)**: Before substantive multi-step work (audits, builds, multi-file changes), follow `.agent/steering/ultramode.md` (or invoke `/ultramode`). Headline rule: re-verify any sub-agent / `COMPLETE` / second-hand claim against the source before acting. Also: verify before claiming; stay in scope and reversible; decision-gate genuine forks; lead with the outcome and close with state. Buys auditability, not baseline correctness; AGENTS.md and voice win on conflict.
 - **Session Continuity**: Logs are stored in `System/session-logs/YYYY-MM-DD/` with `agent: gemini` provenance frontmatter. Check today's logs before starting work.
 - **Steering Priority**: Do NOT preload all steering files. Read `.agent/steering/` files on the relevant action, per the Steering File Priority table in [[AGENTS.md]].
 - **Audit Cadence**: On/after quarter boundaries (Mar/Jun/Sep/Dec 1), check `System/AUDIT-LOG.md`; if the current quarter has no entry, prompt to run `optimize-workspace`. Pruning is human-gated.
