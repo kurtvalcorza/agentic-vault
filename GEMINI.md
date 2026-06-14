@@ -1,7 +1,7 @@
 # Gemini CLI: Vault Instructions
 
 > **Source of Truth:** This file is a **derived digest** of [[AGENTS.md]]. Refer to [[AGENTS.md]] for the canonical version of all protocols. If anything here conflicts with AGENTS.md, AGENTS.md wins.
-> **Synced with AGENTS.md version:** 1.1
+> **Synced with AGENTS.md version:** 1.2
 
 ## Project Overview
 This is the personal knowledge management (PKM) vault of **{{OWNER_NAME}}**. It uses a **Hybrid PARA + Zettelkasten** structure to organize projects, long-term knowledge, and references.
@@ -24,6 +24,7 @@ This is the personal knowledge management (PKM) vault of **{{OWNER_NAME}}**. It 
 - **Skills First**: Check `.agent/skills/` and `.agent/SKILLS-REGISTRY.md` before manual implementation. If no matching skill exists, proceed directly — do not block.
 - **Session Continuity**: Logs are stored in `System/session-logs/YYYY-MM-DD/` with `agent: gemini` provenance frontmatter. Check today's logs before starting work.
 - **Steering Priority**: Do NOT preload all steering files. Read `.agent/steering/` files on the relevant action, per the Steering File Priority table in [[AGENTS.md]].
+- **Audit Cadence**: On/after quarter boundaries (Mar/Jun/Sep/Dec 1), check `System/AUDIT-LOG.md`; if the current quarter has no entry, prompt to run `optimize-workspace`. Pruning is human-gated.
 - **Path Safety**: Use relative paths from the vault root. Never hardcode drive letters.
 - **Frontmatter**: Preserve all YAML metadata in existing notes.
 

@@ -158,6 +158,7 @@ Agents SHOULD NOT preload all steering files at session start. Read them when th
 10. **Area & Resource Intake**: Use [[02_Areas/AREA-INDEX]] for `02_Areas/` and [[RESOURCE-INDEX]] for `03_Resources/`. Update indexes when adding content.
 11. **Obsidian CLI**: For vault-level operations (batch search, orphan detection, plugin management), use the `obsidian-cli` skill — not raw file-system tools.
 12. **Local Git Snapshots**: The vault root is a local git repo (notes + config scope). Commits run **automatically at session end** via `.agent/scripts/vault-git-commit.ps1`. Never commit secrets or nested repos. See **Version Control** below.
+13. **Audit Cadence**: Quarterly stack audit. On/after a quarter boundary (Mar 1 / Jun 1 / Sep 1 / Dec 1), check `System/AUDIT-LOG.md`; if there's no entry for the current quarter, prompt to run `optimize-workspace`. Pruning is human-gated — the audit proposes, the owner approves. See **Audit Cadence** below.
 
 ## Version Control (Local Git)
 
@@ -169,6 +170,17 @@ The vault root is a **local git repository** (no remote) — a version history a
 - **NEVER commit secrets.** Add any secret-bearing file to `.gitignore` first; the commit script also auto-excludes files matching common key/token patterns.
 - **Windows / cloud-sync gotchas:** if the vault lives in a synced folder (Google Drive, OneDrive), enable `core.longpaths true`, and expect `desktop.ini` injection — the commit script purges these each run.
 - **Restore a note:** `git log -- "<file>"` then `git checkout <commit> -- "<file>"` (an agent task, never the owner's).
+
+## Audit Cadence
+
+> **Source of truth:** `System/AUDIT-LOG.md` (the running audit history).
+
+The vault stack gets a **quarterly audit** — prune what drifts, keep what compounds.
+
+- On or after each quarter boundary (**Mar 1 / Jun 1 / Sep 1 / Dec 1**), read `System/AUDIT-LOG.md` before starting work.
+- If there is **no entry for the current quarter**, prompt the owner to run `optimize-workspace`. If an entry already exists, don't prompt again.
+- `optimize-workspace` writes full reports to `.agent/outputs/` and appends a row to `System/AUDIT-LOG.md`.
+- **Pruning is human-gated:** the audit *surfaces* dead weight and *proposes* cuts; the owner approves before removal. Local git is the undo.
 
 ## Conflict Resolution & Error Handling
 
@@ -191,4 +203,4 @@ The vault root is a **local git repository** (no remote) — a version history a
 - Full glossary: `System/memory/glossary.md` | Profiles: `System/memory/people/` | Projects: `System/memory/projects/`
 
 ---
-**Last Updated:** {{DATE}} | **Version:** 1.1 (Added Voice & Anti-Style steering — `voice.md` (house output voice) and `anti-style.md` (banned hype/AI-tells, structural anti-patterns, pre-send test), read on relevant action when drafting)
+**Last Updated:** {{DATE}} | **Version:** 1.2 (Added quarterly Audit Cadence — `System/AUDIT-LOG.md` running log + a quarter-boundary check rule (Operational Protocol 13 + Audit Cadence section) that prompts `optimize-workspace` when a quarter has no entry; `optimize-workspace` appends its own audit row; pruning stays human-gated)

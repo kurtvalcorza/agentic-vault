@@ -86,6 +86,16 @@ When invoked, you will perform a complete workspace audit covering:
 
 ---
 
+### Phase 5: Log the Audit
+
+After the four phases, append to `System/AUDIT-LOG.md`:
+- a **table row** — date / quarter / scope reviewed / what changed (or proposed) / next due (the next quarter boundary);
+- a short **detail block** under `## Audit detail` — health score, key findings, and the prune proposal, linking the reports in `.agent/outputs/`.
+
+Pruning is **human-gated**: record what was *proposed* and leave the row's "what changed" as pending until the owner approves the cuts; then update it.
+
+---
+
 ## Output Files
 
 All outputs saved to: `.agent/outputs/YYYY-MM-DD_Workspace-Optimization/`

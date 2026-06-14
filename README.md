@@ -102,6 +102,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File setup.ps1
 - **Git as a background safety net, not a user-facing tool.** The owner never runs git. Agents do, automatically, with guardrails (secret patterns, nested-repo exclusions, cloud-sync workarounds).
 - **Bi-temporal fact tracking.** Entity notes record *when a fact was true* vs *when the vault learned it* — an append-only `timeline` in frontmatter, so "what did I believe about X in March?" is answerable.
 - **Steering on demand.** Agents read convention docs when the action demands them (creating a file → naming conventions), not as a giant preload.
+- **Quarterly audit cadence.** A dated `AUDIT-LOG.md` plus a quarter-boundary rule prompts a stack audit (`optimize-workspace`) whenever the quarter has no entry — prune what drifts, keep what compounds. Pruning stays human-gated; git is the undo.
 
 ## Repository layout
 
@@ -116,7 +117,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File setup.ps1
 ├── System/
 │   ├── templates/                        note templates
 │   ├── session-logs/YYYY-MM-DD/          per-session agent logs
-│   └── memory/                           glossary, people, projects
+│   ├── memory/                           glossary, people, projects
+│   └── AUDIT-LOG.md                      quarterly stack-audit history
 ├── .agent/                               shared agent workspace
 │   ├── skills/        36 skills (canonical)
 │   ├── steering/      13 convention docs
