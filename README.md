@@ -71,7 +71,7 @@ flowchart TB
 | **Kanban work board** | `01_Projects/To Do.md` — the authoritative "what am I working on" that agents check and update. |
 | **Index scaffolds** | `AREA-INDEX`, `RESOURCE-INDEX` (with a Source Catalog — every source you encounter gets a row), `ARCHIVE-INDEX`, archive taxonomy. |
 | **`/kickoff` command** | An opening-move interview (`.claude/commands/`, `.gemini/commands/`, `.codex/prompts/`) — asks outcome / audience / success / mode, then reads the stack and executes. Backed by the shared `System/opening-move.md` playbook. (Codex reads prompts from `~/.codex/prompts/`; copy the file there.) |
-| **`/ultramode` command** | Activates the **Agent Operating Method** (`.agent/steering/ultramode.md`) for the session — verify-first, re-verify delegated/second-hand claims, decision-gate genuine forks, terse-and-numeric reporting. A behavioral overlay that layers on `AGENTS.md` and the house voice; mirrored across `.claude/commands/`, `.gemini/commands/`, `.codex/prompts/`. |
+| **`/ultramode` command** | Activates the **Agent Operating Method** (`.agent/steering/ultramode.md`) for the session — verify-first, re-verify delegated/second-hand claims, decision-gate genuine forks, terse-and-numeric reporting. A behavioral overlay that layers on `AGENTS.md` and the house voice; mirrored across `.claude/commands/`, `.gemini/commands/`, `.codex/prompts/`. (Codex reads prompts from `~/.codex/prompts/`; copy the file there.) |
 | **Seed examples** | One fictional note per convention (inbox capture, project + card, area note with a bi-temporal timeline, resource with catalog row) so you can see each pattern in action. |
 
 ## Quick start
