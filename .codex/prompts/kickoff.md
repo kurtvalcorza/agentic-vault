@@ -1,0 +1,7 @@
+Run the opening-move interview, then start the work.
+
+Read `System/opening-move.md` (relative to the current working directory — run this from the vault root) for the framing. Then:
+
+1. Interview me with multiple-choice options — not open prose. First skim today's session log and the Kanban board (`01_Projects/To Do`) so the choices are real. Then present the four ingredients as short numbered lists, each with a recommended pick I can confirm by number: outcome (likely board items + Other) → audience (media / leadership / academic / industry / public) → success (a few concrete markers) → mode (think / draft / build / decide). Skip anything I already gave in $ARGUMENTS.
+2. Read the stack. Once framed: load AGENTS.md context, check today's session log and the Kanban board (`01_Projects/To Do`), and pick the matching skill (skills-first). For writing tasks, apply the `voice` + `anti-style` steering.
+3. Recommend, then execute. State the smartest next move in one line. Small task → proceed. Large or irreversible → confirm the plan first.

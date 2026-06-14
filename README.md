@@ -70,6 +70,7 @@ flowchart TB
 | **Hooks for 3 harnesses** | Claude Code `SessionEnd`, Codex `Stop`, Kiro `agentStop` — all converge on: write session log → snapshot vault to git → (monthly) bundle history off-root. |
 | **Kanban work board** | `01_Projects/To Do.md` — the authoritative "what am I working on" that agents check and update. |
 | **Index scaffolds** | `AREA-INDEX`, `RESOURCE-INDEX` (with a Source Catalog — every source you encounter gets a row), `ARCHIVE-INDEX`, archive taxonomy. |
+| **`/kickoff` command** | An opening-move interview (`.claude/commands/`, `.gemini/commands/`, `.codex/prompts/`) — asks outcome / audience / success / mode, then reads the stack and executes. Backed by the shared `System/opening-move.md` playbook. (Codex reads prompts from `~/.codex/prompts/`; copy the file there.) |
 | **Seed examples** | One fictional note per convention (inbox capture, project + card, area note with a bi-temporal timeline, resource with catalog row) so you can see each pattern in action. |
 
 ## Quick start
