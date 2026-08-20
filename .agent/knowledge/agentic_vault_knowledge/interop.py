@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -10,6 +13,7 @@ import yaml
 from .core import iter_markdown, parse_note, split_frontmatter
 
 RESERVED = {"index.md", "log.md"}
+IGNORE_MARKER = ".knowledge-ignore"
 
 
 def _safe_rel(path: Path) -> Path:
@@ -17,35 +21,80 @@ def _safe_rel(path: Path) -> Path:
     return Path(*parts)
 
 
+def _is_within(path: Path, parent: Path) -> bool:
+    path = path.resolve()
+    parent = parent.resolve()
+    return path == parent or parent in path.parents
+
+
 def export_okf_bundle(vault_root: Path, output_dir: Path) -> dict[str, Any]:
     """Export semantic notes as an OKF v0.2-compatible Markdown bundle.
 
-    The export is a projection. It never changes canonical vault files.
+    Source paths are snapshotted before output creation. In-vault exports carry
+    a `.knowledge-ignore` marker so future runtime scans never re-ingest the
+    projection as canonical knowledge.
     """
-    output_dir.mkdir(parents=True, exist_ok=True)
-    exported: list[str] = []
-    for path in iter_markdown(vault_root):
-        note = parse_note(path, vault_root)
-        if not note.semantic:
-            continue
-        rel = _safe_rel(note.path)
-        if rel.name.lower() in RESERVED:
-            rel = rel.with_name(rel.stem + "-concept.md")
-        target = output_dir / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        fm = dict(note.frontmatter)
-        # OKF requires type and tolerates producer-specific fields. Preserve
-        # unknown metadata; stable agentic-vault id remains an extension field.
-        fm["type"] = note.object_type
-        fm.setdefault("title", note.title)
-        text = "---\n" + yaml.safe_dump(fm, sort_keys=False, allow_unicode=True).rstrip() + "\n---\n" + note.body
-        target.write_text(text, encoding="utf-8")
-        exported.append(str(rel).replace("\\", "/"))
-    root_index = output_dir / "index.md"
-    index_fm = {"okf_version": "0.2", "type": "Index", "title": "agentic-vault knowledge export"}
-    body = "# Knowledge Bundle\n\nGenerated from semantic knowledge objects. Canonical state remains in the source vault.\n\n" + "\n".join(f"- [{p}]({p})" for p in sorted(exported)) + "\n"
-    root_index.write_text("---\n" + yaml.safe_dump(index_fm, sort_keys=False).rstrip() + "\n---\n" + body, encoding="utf-8")
-    return {"okf_version": "0.2", "concepts": len(exported), "output": str(output_dir)}
+    root = vault_root.resolve()
+    destination = output_dir.resolve()
+
+    # Snapshot canonical source paths before creating or replacing destination.
+    source_paths = [
+        path for path in iter_markdown(root)
+        if not _is_within(path, destination)
+    ]
+
+    if destination.exists():
+        marker = destination / IGNORE_MARKER
+        if not marker.exists():
+            raise ValueError(
+                f"refusing to replace existing export directory without {IGNORE_MARKER}: {destination}"
+            )
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=destination.name + ".staging.", dir=str(destination.parent)))
+    try:
+        (staging / IGNORE_MARKER).write_text(
+            "Generated knowledge projection. Excluded from canonical vault indexing.\n",
+            encoding="utf-8",
+        )
+        exported: list[str] = []
+        for path in source_paths:
+            note = parse_note(path, root)
+            if not note.semantic:
+                continue
+            rel = _safe_rel(note.path)
+            if rel.name.lower() in RESERVED:
+                rel = rel.with_name(rel.stem + "-concept.md")
+            target = staging / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            fm = dict(note.frontmatter)
+            fm["type"] = note.object_type
+            fm.setdefault("title", note.title)
+            text = "---\n" + yaml.safe_dump(fm, sort_keys=False, allow_unicode=True).rstrip() + "\n---\n" + note.body
+            target.write_text(text, encoding="utf-8")
+            exported.append(str(rel).replace("\\", "/"))
+
+        root_index = staging / "index.md"
+        index_fm = {"okf_version": "0.2", "type": "Index", "title": "agentic-vault knowledge export"}
+        body = (
+            "# Knowledge Bundle\n\n"
+            "Generated from semantic knowledge objects. Canonical state remains in the source vault.\n\n"
+            + "\n".join(f"- [{p}]({p})" for p in sorted(exported))
+            + "\n"
+        )
+        root_index.write_text(
+            "---\n" + yaml.safe_dump(index_fm, sort_keys=False).rstrip() + "\n---\n" + body,
+            encoding="utf-8",
+        )
+
+        if destination.exists():
+            shutil.rmtree(destination)
+        os.replace(staging, destination)
+        staging = None
+        return {"okf_version": "0.2", "concepts": len(exported), "output": str(destination)}
+    finally:
+        if staging is not None:
+            shutil.rmtree(staging, ignore_errors=True)
 
 
 def validate_okf_bundle(bundle_root: Path) -> list[dict[str, str]]:
@@ -67,12 +116,6 @@ def validate_okf_bundle(bundle_root: Path) -> list[dict[str, str]]:
 
 
 def import_okf_candidates(bundle_root: Path) -> list[dict[str, Any]]:
-    """Read an OKF bundle into non-mutating candidate records.
-
-    Import deliberately does not write Markdown because concept IDs in OKF are
-    path-based while agentic-vault stable IDs are independent of paths. Entity
-    resolution/promotion must happen through the normal proposal workflow.
-    """
     issues = validate_okf_bundle(bundle_root)
     if issues:
         raise ValueError(f"invalid OKF bundle: {json.dumps(issues)}")
@@ -92,17 +135,26 @@ def import_okf_candidates(bundle_root: Path) -> list[dict[str, Any]]:
 
 
 def export_jsonld(index, output: Path) -> dict[str, Any]:
-    graph=[]
+    graph = []
     for row in index.conn.execute("SELECT id,type,title,status FROM objects ORDER BY id"):
-        node={"@id":row["id"],"@type":row["type"],"name":row["title"],"status":row["status"]}
-        rels=[]
-        for r in index.conn.execute("SELECT predicate,target_id,status,derivation FROM relations WHERE source_id=?",(row["id"],)):
-            rels.append({"predicate":r["predicate"],"target":{"@id":r["target_id"]},"status":r["status"],"derivation":r["derivation"]})
-        if rels: node["relations"]=rels
+        node = {"@id": row["id"], "@type": row["type"], "name": row["title"], "status": row["status"]}
+        rels = []
+        for rel in index.conn.execute(
+            "SELECT predicate,target_id,status,derivation FROM relations WHERE source_id=?", (row["id"],)
+        ):
+            rels.append({
+                "predicate": rel["predicate"],
+                "target": {"@id": rel["target_id"]},
+                "status": rel["status"],
+                "derivation": rel["derivation"],
+            })
+        if rels:
+            node["relations"] = rels
         graph.append(node)
-    data={"@context":{"name":"https://schema.org/name","status":"https://schema.org/status"},"@graph":graph}
-    output.parent.mkdir(parents=True,exist_ok=True); output.write_text(json.dumps(data,indent=2,ensure_ascii=False),encoding="utf-8")
-    return {"objects":len(graph),"output":str(output)}
+    data = {"@context": {"name": "https://schema.org/name", "status": "https://schema.org/status"}, "@graph": graph}
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    return {"objects": len(graph), "output": str(output)}
 
 
 def _urn(kind: str, value: str) -> str:
@@ -114,11 +166,6 @@ def _literal(value: str) -> str:
 
 
 def export_rdf_ntriples(index, output: Path) -> dict[str, Any]:
-    """Export the accepted semantic graph as standards-compliant N-Triples.
-
-    Stable vault IDs and predicates are mapped to reversible URNs so RDF export
-    does not impose RDF identity rules on canonical Markdown.
-    """
     rdf_type = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>"
     rdfs_label = "<http://www.w3.org/2000/01/rdf-schema#label>"
     av_status = _urn("property", "status")
@@ -129,7 +176,10 @@ def export_rdf_ntriples(index, output: Path) -> dict[str, Any]:
         lines.append(f"{subject} {rdf_type} {_urn('class', row['type'])} .")
         lines.append(f"{subject} {rdfs_label} {_literal(row['title'])} .")
         lines.append(f"{subject} {av_status} {_literal(row['status'] or '')} .")
-    for rel in index.conn.execute("SELECT source_id,predicate,target_id,status,derivation FROM relations WHERE status='accepted' ORDER BY source_id,predicate,target_id"):
+    for rel in index.conn.execute(
+        "SELECT source_id,predicate,target_id,status,derivation FROM relations "
+        "WHERE status='accepted' ORDER BY source_id,predicate,target_id"
+    ):
         subject = _urn("object", rel["source_id"])
         predicate = _urn("relation", rel["predicate"])
         target = _urn("object", rel["target_id"])
