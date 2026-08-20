@@ -185,7 +185,7 @@ def parse_note(path: Path, vault_root: Path | None = None) -> ParsedNote:
 
 
 def iter_markdown(vault_root: Path) -> Iterator[Path]:
-    excluded = {".git", ".venv", "node_modules", "generated"}
+    excluded = {".git", ".venv", "node_modules", "generated", "export"}
     for path in vault_root.rglob("*.md"):
         if any(part in excluded for part in path.parts):
             continue
