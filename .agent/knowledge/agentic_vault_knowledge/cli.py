@@ -5,9 +5,11 @@ import json
 from pathlib import Path
 
 from .runtime_index import RuntimeIndex
-from .core import apply_patch, propose_frontmatter_patch, validate_patch, validate_vault, vault_roots
+from .core import apply_patch, propose_frontmatter_patch, validate_patch, vault_roots
 from .interop import export_jsonld, export_okf_bundle, import_okf_candidates, validate_okf_bundle
 from .migrations import plan_migrations, schema_version
+from .transactions import apply_batch, validate_batch
+from .validation import validate_vault_semantics
 
 
 def _root(value: str | None) -> Path: return Path(value or ".").resolve()
@@ -19,6 +21,8 @@ def main() -> int:
     s=sub.add_parser("search"); s.add_argument("query"); s.add_argument("--limit",type=int,default=20)
     for name in ("get","resolve","timeline","sources","claims","impact"):
         x=sub.add_parser(name); x.add_argument("id")
+    cs=sub.add_parser("claim-sources"); cs.add_argument("claim_id")
+    sao=sub.add_parser("state-as-of"); sao.add_argument("id"); sao.add_argument("as_of")
     n=sub.add_parser("neighbors"); n.add_argument("id"); n.add_argument("--predicate"); n.add_argument("--include-derived",action="store_true")
     t=sub.add_parser("trace"); t.add_argument("start"); t.add_argument("end"); t.add_argument("--max-depth",type=int,default=6)
     q=sub.add_parser("query"); q.add_argument("--type"); q.add_argument("--predicate"); q.add_argument("--target"); q.add_argument("--status",default="accepted"); q.add_argument("--limit",type=int,default=100)
@@ -29,17 +33,26 @@ def main() -> int:
     ej=sub.add_parser("export-jsonld"); ej.add_argument("output")
     mp=sub.add_parser("plan-migrations"); mp.add_argument("from_version"); mp.add_argument("--to-version")
     pp=sub.add_parser("propose"); pp.add_argument("path"); pp.add_argument("patch_json")
-    vp=sub.add_parser("validate-patch"); vp.add_argument("proposal"); ap=sub.add_parser("apply-patch"); ap.add_argument("proposal")
+    vp=sub.add_parser("validate-patch"); vp.add_argument("proposal")
+    vb=sub.add_parser("validate-batch"); vb.add_argument("proposals")
+    ap=sub.add_parser("apply-patch"); ap.add_argument("proposal")
+    ab=sub.add_parser("apply-batch"); ab.add_argument("proposals")
     args=p.parse_args(); root=_root(args.vault); _,schema,db=vault_roots(root)
 
     if args.cmd=="validate":
-        issues=validate_vault(root); print(json.dumps([i.__dict__ for i in issues],indent=2)); return 1 if issues else 0
+        issues=validate_vault_semantics(root,schema); print(json.dumps([i.__dict__ for i in issues],indent=2)); return 1 if any(i.severity=="error" for i in issues) else 0
     if args.cmd=="propose":
-        proposal=propose_frontmatter_patch((root/args.path).resolve(),json.loads(args.patch_json)); print(json.dumps(proposal,indent=2)); return 0
+        path=(root/args.path).resolve()
+        if path==root or root not in path.parents: raise SystemExit("path escapes vault root")
+        proposal=propose_frontmatter_patch(path,json.loads(args.patch_json)); print(json.dumps(proposal,indent=2)); return 0
     if args.cmd in {"validate-patch","apply-patch"}:
         proposal=json.loads(Path(args.proposal).read_text(encoding="utf-8"))
         if args.cmd=="validate-patch": print(json.dumps([i.__dict__ for i in validate_patch(proposal,root)],indent=2)); return 0
         apply_patch(proposal,root); return 0
+    if args.cmd in {"validate-batch","apply-batch"}:
+        proposals=json.loads(Path(args.proposals).read_text(encoding="utf-8"))
+        if args.cmd=="validate-batch": print(json.dumps(validate_batch(proposals,root),indent=2)); return 0
+        print(json.dumps({"applied":apply_batch(proposals,root)},indent=2)); return 0
     if args.cmd=="export-okf":
         print(json.dumps(export_okf_bundle(root,(root/args.output).resolve()),indent=2)); return 0
     if args.cmd=="validate-okf":
@@ -51,7 +64,7 @@ def main() -> int:
 
     with RuntimeIndex(db) as idx:
         if args.cmd=="build":
-            issues=idx.rebuild(root,schema) if args.full else idx.build(root,schema); print(json.dumps([i.__dict__ for i in issues],indent=2)); return 1 if issues else 0
+            issues=idx.rebuild(root,schema) if args.full else idx.build(root,schema); print(json.dumps([i.__dict__ for i in issues],indent=2)); return 1 if any(i.severity=="error" for i in issues) else 0
         idx.build(root,schema)
         if args.cmd=="health": out=idx.health()
         elif args.cmd=="search": out=idx.search(args.query,args.limit)
@@ -60,8 +73,10 @@ def main() -> int:
         elif args.cmd=="neighbors": out=idx.neighbors(args.id,args.predicate,args.include_derived)
         elif args.cmd=="trace": out=idx.trace(args.start,args.end,args.max_depth)
         elif args.cmd=="timeline": out=idx.timeline(args.id)
+        elif args.cmd=="state-as-of": out=idx.state_as_of(args.id,args.as_of)
         elif args.cmd=="sources": out=idx.sources(args.id)
         elif args.cmd=="claims": out=idx.claims(args.id)
+        elif args.cmd=="claim-sources": out=idx.claim_sources(args.claim_id)
         elif args.cmd=="impact": out=idx.impact(args.id)
         elif args.cmd=="communities": out=idx.communities()
         elif args.cmd=="central": out=idx.central_objects()
