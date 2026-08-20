@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import yaml
 
@@ -34,7 +34,7 @@ def export_okf_bundle(vault_root: Path, output_dir: Path) -> dict[str, Any]:
         target = output_dir / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         fm = dict(note.frontmatter)
-        # OKF requires only type and tolerates producer-specific fields. Preserve
+        # OKF requires type and tolerates producer-specific fields. Preserve
         # unknown metadata; stable agentic-vault id remains an extension field.
         fm["type"] = note.object_type
         fm.setdefault("title", note.title)
@@ -103,3 +103,39 @@ def export_jsonld(index, output: Path) -> dict[str, Any]:
     data={"@context":{"name":"https://schema.org/name","status":"https://schema.org/status"},"@graph":graph}
     output.parent.mkdir(parents=True,exist_ok=True); output.write_text(json.dumps(data,indent=2,ensure_ascii=False),encoding="utf-8")
     return {"objects":len(graph),"output":str(output)}
+
+
+def _urn(kind: str, value: str) -> str:
+    return f"<urn:agentic-vault:{kind}:{quote(value, safe='')}>"
+
+
+def _literal(value: str) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def export_rdf_ntriples(index, output: Path) -> dict[str, Any]:
+    """Export the accepted semantic graph as standards-compliant N-Triples.
+
+    Stable vault IDs and predicates are mapped to reversible URNs so RDF export
+    does not impose RDF identity rules on canonical Markdown.
+    """
+    rdf_type = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>"
+    rdfs_label = "<http://www.w3.org/2000/01/rdf-schema#label>"
+    av_status = _urn("property", "status")
+    av_derivation = _urn("property", "derivation")
+    lines: list[str] = []
+    for row in index.conn.execute("SELECT id,type,title,status FROM objects ORDER BY id"):
+        subject = _urn("object", row["id"])
+        lines.append(f"{subject} {rdf_type} {_urn('class', row['type'])} .")
+        lines.append(f"{subject} {rdfs_label} {_literal(row['title'])} .")
+        lines.append(f"{subject} {av_status} {_literal(row['status'] or '')} .")
+    for rel in index.conn.execute("SELECT source_id,predicate,target_id,status,derivation FROM relations WHERE status='accepted' ORDER BY source_id,predicate,target_id"):
+        subject = _urn("object", rel["source_id"])
+        predicate = _urn("relation", rel["predicate"])
+        target = _urn("object", rel["target_id"])
+        lines.append(f"{subject} {predicate} {target} .")
+        edge = _urn("edge", f"{rel['source_id']}|{rel['predicate']}|{rel['target_id']}")
+        lines.append(f"{edge} {av_derivation} {_literal(rel['derivation'])} .")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    return {"triples": len(lines), "output": str(output), "format": "application/n-triples"}
