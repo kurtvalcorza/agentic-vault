@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 from .advanced import EXTENDED_SQL, ExtendedKnowledgeIndex
-from .core import KnowledgeIndex, ParsedNote, SCHEMA_SQL, ValidationIssue
+from .core import KnowledgeIndex, SCHEMA_SQL, ValidationIssue, iter_markdown
 
 NORMAL_FTS_SQL = "CREATE VIRTUAL TABLE objects_fts USING fts5(id UNINDEXED, title, body, aliases, tags)"
 EXPECTED_CLAIM_COLUMNS = {
@@ -18,10 +18,13 @@ EXPECTED_CLAIM_COLUMNS = {
 
 
 class RuntimeIndex(ExtendedKnowledgeIndex):
-    """Production index wrapper with storage migrations and correct full rebuild semantics."""
+    """Production index wrapper with storage migrations and warm incremental refresh."""
 
     def __init__(self, db_path: Path):
-        super().__init__(db_path)
+        # Do not let ExtendedKnowledgeIndex create indexes against an old claims
+        # table before compatibility repair has had a chance to inspect it.
+        KnowledgeIndex.__init__(self, db_path)
+        self._last_fingerprint: tuple | None = None
         self._ensure_mutable_fts()
         self._ensure_extended_schema()
         self.conn.executescript(EXTENDED_SQL)
@@ -31,20 +34,12 @@ class RuntimeIndex(ExtendedKnowledgeIndex):
         sql = row[0] if row else ""
         if "content=''" not in sql.replace(" ", ""):
             return
-        # One-time migration from the early contentless projection. Mark every
-        # file dirty so the ordinary incremental build repopulates search rows.
         self.conn.execute("DROP TABLE objects_fts")
         self.conn.execute(NORMAL_FTS_SQL)
         self.conn.execute("DELETE FROM files")
         self.conn.commit()
 
     def _ensure_extended_schema(self) -> None:
-        """Recreate incompatible *derived* claim tables in place.
-
-        The runtime database is disposable, so a schema mismatch is repaired by
-        dropping only derived claim projections and their generated relation
-        edges. Canonical Markdown is never migrated through this path.
-        """
         exists = self.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='claims'").fetchone()
         if not exists:
             return
@@ -54,19 +49,36 @@ class RuntimeIndex(ExtendedKnowledgeIndex):
         self.conn.execute("DELETE FROM relations WHERE path LIKE '__claim__:%'")
         self.conn.execute("DROP TABLE IF EXISTS claim_evidence")
         self.conn.execute("DROP TABLE IF EXISTS claims")
+        # Force canonical Markdown to repopulate all repaired derived tables.
+        self.conn.execute("DELETE FROM files")
         self.conn.commit()
 
-    def upsert(self, note: ParsedNote) -> None:
-        """Upsert by stable identity, allowing files to move/rename safely."""
-        if note.semantic and note.object_id:
-            new_path = str(note.path).replace("\\", "/")
-            existing = self.conn.execute("SELECT path FROM objects WHERE id=?", (note.object_id,)).fetchone()
-            if existing and existing["path"] != new_path:
-                self._remove_path(existing["path"])
-        super().upsert(note)
+    def _fingerprint(self, vault_root: Path, schema_root: Path) -> tuple:
+        files = []
+        for path in iter_markdown(vault_root):
+            stat = path.stat()
+            files.append((str(path.relative_to(vault_root)).replace("\\", "/"), stat.st_mtime_ns, stat.st_size))
+        schema_files = []
+        for path in sorted(schema_root.rglob("*.yaml")):
+            stat = path.stat()
+            schema_files.append((str(path.relative_to(schema_root)), stat.st_mtime_ns, stat.st_size))
+        version = schema_root / "VERSION"
+        if version.exists():
+            stat = version.stat()
+            schema_files.append(("VERSION", stat.st_mtime_ns, stat.st_size))
+        return tuple(sorted(files)), tuple(schema_files)
+
+    def refresh(self, vault_root: Path, schema_root: Path) -> list[ValidationIssue]:
+        """Skip parsing/index work when vault and schema metadata are unchanged."""
+        fingerprint = self._fingerprint(vault_root, schema_root)
+        if self._last_fingerprint == fingerprint:
+            return []
+        issues = self.build(vault_root, schema_root)
+        if not any(i.severity == "error" for i in issues):
+            self._last_fingerprint = fingerprint
+        return issues
 
     def resolve(self, ref: str) -> list[dict]:
-        """Resolve IDs/aliases and follow explicit merge redirects safely."""
         results = KnowledgeIndex.resolve(self, ref)
         if len(results) != 1:
             return results
@@ -90,18 +102,20 @@ class RuntimeIndex(ExtendedKnowledgeIndex):
         return [current]
 
     def rebuild(self, vault_root: Path, schema_root: Path) -> list[ValidationIssue]:
-        """Delete every derived byte, recreate all runtime schemas, and rebuild from Markdown."""
         db_path = self.db_path
         self.close()
         with contextlib.suppress(FileNotFoundError):
             db_path.unlink()
         self.conn = sqlite3.connect(db_path)
         self.conn.row_factory = sqlite3.Row
-        # Use mutable FTS on fresh databases rather than the legacy contentless definition.
         base = SCHEMA_SQL.replace(
             "CREATE VIRTUAL TABLE IF NOT EXISTS objects_fts USING fts5(id UNINDEXED, title, body, aliases, tags, content='');",
             "CREATE VIRTUAL TABLE IF NOT EXISTS objects_fts USING fts5(id UNINDEXED, title, body, aliases, tags);",
         )
         self.conn.executescript(base)
         self.conn.executescript(EXTENDED_SQL)
-        return self.build(vault_root, schema_root)
+        self._last_fingerprint = None
+        issues = self.build(vault_root, schema_root)
+        if not any(i.severity == "error" for i in issues):
+            self._last_fingerprint = self._fingerprint(vault_root, schema_root)
+        return issues
