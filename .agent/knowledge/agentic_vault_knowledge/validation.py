@@ -1,14 +1,28 @@
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from .advanced import load_relation_registry_with_extensions
-from .core import DERIVATIONS, SEMANTIC_TYPES, STATUSES, ValidationIssue, iter_markdown, parse_note, validate_note
+from .core import (
+    DERIVATIONS,
+    SEMANTIC_TYPES,
+    STATUSES,
+    ParsedNote,
+    ValidationIssue,
+    _norm,
+    iter_markdown,
+    parse_note,
+    sha256_text,
+    validate_note,
+    vault_roots,
+)
 
 LOCATOR_TYPES = {"file", "heading", "obsidian-block", "line-range", "url", "pdf-page", "timestamp", "commit"}
 REVIEW_STATUSES = {"unreviewed", "pending", "accepted", "rejected"}
@@ -16,18 +30,41 @@ SOURCE_AUTHORITIES = {"primary", "secondary", "tertiary", "unknown"}
 SCHEMA_VERSION_RE = re.compile(r"^\d+\.\d+(?:\.\d+)?$")
 
 
-def load_extension_classes(schema_root: Path) -> dict[str, dict[str, Any]]:
-    classes: dict[str, dict[str, Any]] = {}
+def load_class_specs(schema_root: Path) -> dict[str, dict[str, Any]]:
+    core = yaml.safe_load((schema_root / "core.yaml").read_text(encoding="utf-8")) or {}
+    classes = {str(name): dict(spec or {}) for name, spec in (core.get("classes") or {}).items()}
     ext = schema_root / "extensions"
-    if not ext.exists():
-        return classes
-    for path in sorted(ext.glob("*.yaml")):
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        for name, spec in (data.get("classes") or {}).items():
-            if name in SEMANTIC_TYPES or name in classes:
-                raise ValueError(f"extension class shadows/duplicates existing class: {name}")
-            classes[str(name)] = dict(spec or {})
+    if ext.exists():
+        for path in sorted(ext.glob("*.yaml")):
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            for name, spec in (data.get("classes") or {}).items():
+                if name in classes:
+                    raise ValueError(f"extension class shadows/duplicates existing class: {name}")
+                classes[str(name)] = dict(spec or {})
     return classes
+
+
+def load_extension_classes(schema_root: Path) -> dict[str, dict[str, Any]]:
+    classes = load_class_specs(schema_root)
+    return {name: spec for name, spec in classes.items() if name not in SEMANTIC_TYPES}
+
+
+def _ancestors(class_name: str, class_specs: dict[str, dict[str, Any]]) -> set[str]:
+    out = {class_name}
+    stack = [class_name]
+    while stack:
+        current = stack.pop()
+        parent = class_specs.get(current, {}).get("is_a")
+        if parent and str(parent) not in out:
+            out.add(str(parent))
+            stack.append(str(parent))
+    return out
+
+
+def _type_allowed(actual: str, allowed: set[str], class_specs: dict[str, dict[str, Any]]) -> bool:
+    if not allowed:
+        return True
+    return bool(_ancestors(actual, class_specs) & allowed)
 
 
 def _date(value: Any) -> bool:
@@ -72,7 +109,8 @@ def _validate_evidence(path: str, raw: Any, prefix: str) -> list[ValidationIssue
                 issues.append(ValidationIssue(path, "invalid-evidence", f"{prefix}.evidence[{i}] is empty"))
             continue
         if not isinstance(item, dict) or not item.get("source"):
-            issues.append(ValidationIssue(path, "invalid-evidence", f"{prefix}.evidence[{i}] requires source")); continue
+            issues.append(ValidationIssue(path, "invalid-evidence", f"{prefix}.evidence[{i}] requires source"))
+            continue
         locator = item.get("locator") if isinstance(item.get("locator"), dict) else {}
         lt = item.get("locator_type") or locator.get("type") or "file"
         if lt not in LOCATOR_TYPES:
@@ -114,23 +152,51 @@ def _validate_statement(path: str, raw: dict[str, Any], prefix: str, registry: d
     return issues
 
 
-def validate_vault_semantics(vault_root: Path, schema_root: Path) -> list[ValidationIssue]:
-    registry = load_relation_registry_with_extensions(schema_root)
-    extension_classes = load_extension_classes(schema_root)
+def _scan_notes(vault_root: Path, replacement: tuple[Path, str] | None = None) -> tuple[list[ValidationIssue], list[ParsedNote]]:
     issues: list[ValidationIssue] = []
-    notes = []
-    ids: dict[str, Any] = {}
-    aliases: dict[str, set[str]] = {}
-
+    notes: list[ParsedNote] = []
+    target = replacement[0].resolve() if replacement else None
     for path in iter_markdown(vault_root):
+        if target is not None and path.resolve() == target:
+            continue
         try:
-            note = parse_note(path, vault_root)
+            notes.append(parse_note(path, vault_root))
         except Exception as exc:
-            issues.append(ValidationIssue(str(path.relative_to(vault_root)), "parse-error", str(exc))); continue
-        notes.append(note)
+            issues.append(ValidationIssue(str(path.relative_to(vault_root)), "parse-error", str(exc)))
+    if replacement:
+        target_path, content = replacement
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                temp = Path(tmp) / target_path.name
+                temp.write_text(content, encoding="utf-8")
+                candidate = parse_note(temp)
+                candidate = dataclasses.replace(
+                    candidate,
+                    path=target_path.resolve().relative_to(vault_root.resolve()),
+                    content_hash=sha256_text(content),
+                )
+                notes.append(candidate)
+        except Exception as exc:
+            issues.append(ValidationIssue(str(target_path), "parse-error", str(exc)))
+    return issues, notes
+
+
+def scan_vault_semantics(
+    vault_root: Path,
+    schema_root: Path,
+    replacement: tuple[Path, str] | None = None,
+) -> tuple[list[ValidationIssue], list[ParsedNote]]:
+    registry = load_relation_registry_with_extensions(schema_root)
+    class_specs = load_class_specs(schema_root)
+    extension_classes = {name for name in class_specs if name not in SEMANTIC_TYPES}
+    issues, notes = _scan_notes(vault_root, replacement)
+    ids: dict[str, ParsedNote] = {}
+    aliases: dict[str, set[str]] = {}
+    claim_ids: dict[str, str] = {}
+
+    for note in notes:
         p = str(note.path)
         base = validate_note(note, registry)
-        # Unknown extension classes are handled here; avoid core's intentionally permissive type logic.
         issues.extend(i for i in base if i.code != "unknown-relation")
         if not note.semantic:
             continue
@@ -150,7 +216,9 @@ def validate_vault_semantics(vault_root: Path, schema_root: Path) -> list[Valida
         if status == "merged" and not note.frontmatter.get("redirect_to"):
             issues.append(ValidationIssue(p, "missing-redirect", "merged object requires redirect_to"))
         for alias in (note.title, *note.aliases):
-            aliases.setdefault(alias.casefold().strip(), set()).add(oid)
+            normalized = _norm(alias)
+            if normalized:
+                aliases.setdefault(normalized, set()).add(oid)
         for i, rel in enumerate(note.frontmatter.get("relations") or []):
             if isinstance(rel, dict):
                 issues.extend(_validate_statement(p, rel, f"relations[{i}]", registry, "target"))
@@ -158,17 +226,17 @@ def validate_vault_semantics(vault_root: Path, schema_root: Path) -> list[Valida
         if claims and not isinstance(claims, list):
             issues.append(ValidationIssue(p, "invalid-claims", "claims must be a list"))
         elif isinstance(claims, list):
-            claim_ids: set[str] = set()
             for i, claim in enumerate(claims):
                 if not isinstance(claim, dict):
-                    issues.append(ValidationIssue(p, "invalid-claim", f"claims[{i}] must be a mapping")); continue
+                    issues.append(ValidationIssue(p, "invalid-claim", f"claims[{i}] must be a mapping"))
+                    continue
                 cid = str(claim.get("id") or f"claim:{oid}:{i}")
                 if cid in claim_ids:
-                    issues.append(ValidationIssue(p, "duplicate-claim-id", f"duplicate claim id within note: {cid}"))
-                claim_ids.add(cid)
+                    issues.append(ValidationIssue(p, "duplicate-claim-id", f"claim id {cid} also used by {claim_ids[cid]}"))
+                else:
+                    claim_ids[cid] = p
                 issues.extend(_validate_statement(p, claim, f"claims[{i}]", registry, "object"))
 
-    # Cross-object checks require the full object map.
     for note in notes:
         if not note.semantic:
             continue
@@ -177,20 +245,34 @@ def validate_vault_semantics(vault_root: Path, schema_root: Path) -> list[Valida
         redirect = fm.get("redirect_to")
         if redirect and str(redirect) not in ids:
             issues.append(ValidationIssue(p, "unresolved-redirect", f"redirect target not found: {redirect}"))
-        for i, rel in enumerate(fm.get("relations") or []):
-            if not isinstance(rel, dict) or not rel.get("predicate") or rel.get("target") is None:
+        statements: list[tuple[str, dict[str, Any], str]] = []
+        statements.extend((f"relations[{i}]", rel, "target") for i, rel in enumerate(fm.get("relations") or []) if isinstance(rel, dict))
+        statements.extend((f"claims[{i}]", claim, "object") for i, claim in enumerate(fm.get("claims") or []) if isinstance(claim, dict))
+        for prefix, statement, target_key in statements:
+            if not statement.get("predicate") or statement.get(target_key) is None:
                 continue
-            pred = str(rel["predicate"]); target = str(rel["target"]); spec = registry.get(pred) or {}
+            pred = str(statement["predicate"])
+            target = str(statement[target_key])
+            spec = registry.get(pred) or {}
             src_type = note.object_type or "KnowledgeObject"
             tgt_type = ids[target].object_type if target in ids else None
             domain = set(spec.get("domain") or [])
             range_ = set(spec.get("range") or [])
-            if domain and "KnowledgeObject" not in domain and src_type not in domain:
-                issues.append(ValidationIssue(p, "relation-domain", f"{pred} does not allow source type {src_type}"))
-            if tgt_type and range_ and "KnowledgeObject" not in range_ and tgt_type not in range_:
-                issues.append(ValidationIssue(p, "relation-range", f"{pred} does not allow target type {tgt_type}"))
-        # Alias collisions are not auto-merge errors, but they are surfaced for review.
+            if domain and not _type_allowed(src_type, domain, class_specs):
+                issues.append(ValidationIssue(p, "relation-domain", f"{prefix}: {pred} does not allow source type {src_type}"))
+            if tgt_type and range_ and not _type_allowed(tgt_type, range_, class_specs):
+                issues.append(ValidationIssue(p, "relation-range", f"{prefix}: {pred} does not allow target type {tgt_type}"))
+
     for alias, object_ids in sorted(aliases.items()):
-        if alias and len(object_ids) > 1:
+        if len(object_ids) > 1:
             issues.append(ValidationIssue("<vault>", "ambiguous-alias", f"alias/title {alias!r} resolves to {sorted(object_ids)}", severity="warning"))
-    return issues
+    return issues, notes
+
+
+def validate_vault_semantics(vault_root: Path, schema_root: Path) -> list[ValidationIssue]:
+    return scan_vault_semantics(vault_root, schema_root)[0]
+
+
+def validate_candidate_semantics(content: str, target_path: Path, vault_root: Path) -> list[ValidationIssue]:
+    _, schema_root, _ = vault_roots(vault_root)
+    return scan_vault_semantics(vault_root, schema_root, (target_path, content))[0]
