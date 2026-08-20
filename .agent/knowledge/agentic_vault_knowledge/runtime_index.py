@@ -21,8 +21,6 @@ class RuntimeIndex(ExtendedKnowledgeIndex):
     """Production index wrapper with storage migrations and warm incremental refresh."""
 
     def __init__(self, db_path: Path):
-        # Do not let ExtendedKnowledgeIndex create indexes against an old claims
-        # table before compatibility repair has had a chance to inspect it.
         KnowledgeIndex.__init__(self, db_path)
         self._last_fingerprint: tuple | None = None
         self._ensure_mutable_fts()
@@ -42,6 +40,10 @@ class RuntimeIndex(ExtendedKnowledgeIndex):
     def _ensure_extended_schema(self) -> None:
         exists = self.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='claims'").fetchone()
         if not exists:
+            # A pre-claims runtime may already have a populated file hash table.
+            # Mark it dirty so the newly introduced claim projection is filled.
+            self.conn.execute("DELETE FROM files")
+            self.conn.commit()
             return
         columns = {r["name"] for r in self.conn.execute("PRAGMA table_info(claims)")}
         if columns == EXPECTED_CLAIM_COLUMNS:
@@ -49,7 +51,6 @@ class RuntimeIndex(ExtendedKnowledgeIndex):
         self.conn.execute("DELETE FROM relations WHERE path LIKE '__claim__:%'")
         self.conn.execute("DROP TABLE IF EXISTS claim_evidence")
         self.conn.execute("DROP TABLE IF EXISTS claims")
-        # Force canonical Markdown to repopulate all repaired derived tables.
         self.conn.execute("DELETE FROM files")
         self.conn.commit()
 
@@ -69,7 +70,6 @@ class RuntimeIndex(ExtendedKnowledgeIndex):
         return tuple(sorted(files)), tuple(schema_files)
 
     def refresh(self, vault_root: Path, schema_root: Path) -> list[ValidationIssue]:
-        """Skip parsing/index work when vault and schema metadata are unchanged."""
         fingerprint = self._fingerprint(vault_root, schema_root)
         if self._last_fingerprint == fingerprint:
             return []
