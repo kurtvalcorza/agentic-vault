@@ -9,6 +9,8 @@ from mcp.server import MCPServer
 
 from agentic_vault_knowledge.runtime_index import RuntimeIndex
 from agentic_vault_knowledge.core import apply_patch, propose_frontmatter_patch, validate_patch, vault_roots
+from agentic_vault_knowledge.transactions import apply_batch, validate_batch
+from agentic_vault_knowledge.validation import validate_vault_semantics
 
 VAULT_ROOT=Path(os.environ.get("AGENTIC_VAULT_ROOT",".")).resolve()
 READ_ONLY=os.environ.get("AGENTIC_VAULT_KNOWLEDGE_READ_ONLY","1").lower() not in {"0","false","no"}
@@ -20,6 +22,15 @@ def _with_index(fn):
         idx.build(VAULT_ROOT,SCHEMA_ROOT)
         return fn(idx)
 
+def _safe_path(relative_path:str)->Path:
+    path=(VAULT_ROOT/relative_path).resolve()
+    if path==VAULT_ROOT or VAULT_ROOT not in path.parents: raise ValueError("path escapes vault root")
+    return path
+
+@mcp.tool()
+def knowledge_validate()->list[dict[str,Any]]:
+    """Validate semantic objects, extensions, claims, relations, redirects, provenance, and temporal fields."""
+    return [x.__dict__ for x in validate_vault_semantics(VAULT_ROOT,SCHEMA_ROOT)]
 @mcp.tool()
 def knowledge_resolve_entity(ref:str)->list[dict[str,Any]]: return _with_index(lambda i:i.resolve(ref))
 @mcp.tool()
@@ -35,9 +46,13 @@ def knowledge_query(object_type:str|None=None,predicate:str|None=None,target:str
 @mcp.tool()
 def knowledge_timeline(object_id:str)->list[dict[str,Any]]: return _with_index(lambda i:i.timeline(object_id))
 @mcp.tool()
+def knowledge_state_as_of(object_id:str,as_of:str)->dict[str,Any]: return _with_index(lambda i:i.state_as_of(object_id,as_of))
+@mcp.tool()
 def knowledge_sources(object_id:str)->list[dict[str,Any]]: return _with_index(lambda i:i.sources(object_id))
 @mcp.tool()
 def knowledge_claims(object_id:str|None=None,status:str|None=None)->list[dict[str,Any]]: return _with_index(lambda i:i.claims(object_id,status))
+@mcp.tool()
+def knowledge_claim_sources(claim_id:str)->list[dict[str,Any]]: return _with_index(lambda i:i.claim_sources(claim_id))
 @mcp.tool()
 def knowledge_contradictions()->list[dict[str,Any]]: return _with_index(lambda i:i.contradiction_candidates())
 @mcp.tool()
@@ -49,8 +64,8 @@ def knowledge_health()->dict[str,Any]: return _with_index(lambda i:i.health())
 
 @mcp.tool()
 def knowledge_propose_patch(relative_path:str,patch:dict[str,Any])->dict[str,Any]:
-    path=(VAULT_ROOT/relative_path).resolve()
-    if path==VAULT_ROOT or VAULT_ROOT not in path.parents: raise ValueError("path escapes vault root")
+    """Create a hash-bound candidate patch without mutating canonical Markdown."""
+    path=_safe_path(relative_path)
     proposal=propose_frontmatter_patch(path,patch); proposal["path"]=str(path); proposal["validation"]=[x.__dict__ for x in validate_patch(proposal,VAULT_ROOT)]; return proposal
 
 @mcp.tool()
@@ -58,11 +73,20 @@ def knowledge_validate_patch(proposal_json:str)->list[dict[str,Any]]:
     return [x.__dict__ for x in validate_patch(json.loads(proposal_json),VAULT_ROOT)]
 
 @mcp.tool()
+def knowledge_validate_batch(proposals_json:str)->list[dict[str,Any]]:
+    return validate_batch(json.loads(proposals_json),VAULT_ROOT)
+
+@mcp.tool()
 def knowledge_apply_patch(proposal_json:str)->dict[str,Any]:
     if READ_ONLY: raise PermissionError("knowledge runtime is read-only; set AGENTIC_VAULT_KNOWLEDGE_READ_ONLY=0 to enable writes")
     proposal=json.loads(proposal_json); path=Path(proposal["path"]).resolve()
     if path==VAULT_ROOT or VAULT_ROOT not in path.parents: raise ValueError("path escapes vault root")
     apply_patch(proposal,VAULT_ROOT); return {"applied":True,"path":str(path.relative_to(VAULT_ROOT))}
+
+@mcp.tool()
+def knowledge_apply_batch(proposals_json:str)->dict[str,Any]:
+    if READ_ONLY: raise PermissionError("knowledge runtime is read-only; set AGENTIC_VAULT_KNOWLEDGE_READ_ONLY=0 to enable writes")
+    applied=apply_batch(json.loads(proposals_json),VAULT_ROOT); return {"applied":applied,"count":len(applied)}
 
 def main()->None: mcp.run()
 if __name__=="__main__": main()
