@@ -1,39 +1,102 @@
 version: "0.1.0"
 relations:
   related_to:
+    label: related to
     inverse: related_to
+    domain: [KnowledgeObject]
+    range: [KnowledgeObject]
     symmetric: true
+    transitive: false
     description: Generic semantic association when a more specific predicate is unavailable.
   part_of:
+    label: part of
     inverse: has_part
+    domain: [KnowledgeObject]
+    range: [KnowledgeObject]
+    symmetric: false
     transitive: true
   has_part:
+    label: has part
     inverse: part_of
+    domain: [KnowledgeObject]
+    range: [KnowledgeObject]
   depends_on:
+    label: depends on
     inverse: dependency_of
+    domain: [KnowledgeObject]
+    range: [KnowledgeObject]
   dependency_of:
+    label: dependency of
     inverse: depends_on
+    domain: [KnowledgeObject]
+    range: [KnowledgeObject]
   supports:
+    label: supports
     inverse: supported_by
+    domain: [KnowledgeObject]
+    range: [KnowledgeObject]
   supported_by:
+    label: supported by
     inverse: supports
+    domain: [KnowledgeObject]
+    range: [KnowledgeObject]
   contradicts:
+    label: contradicts
     inverse: contradicted_by
+    domain: [KnowledgeObject]
+    range: [KnowledgeObject]
   contradicted_by:
+    label: contradicted by
     inverse: contradicts
+    domain: [KnowledgeObject]
+    range: [KnowledgeObject]
   supersedes:
+    label: supersedes
     inverse: superseded_by
+    domain: [KnowledgeObject]
+    range: [KnowledgeObject]
   superseded_by:
+    label: superseded by
     inverse: supersedes
+    domain: [KnowledgeObject]
+    range: [KnowledgeObject]
   derived_from:
+    label: derived from
     inverse: source_for
+    domain: [KnowledgeObject]
+    range: [KnowledgeObject]
   source_for:
+    label: source for
     inverse: derived_from
+    domain: [KnowledgeObject]
+    range: [KnowledgeObject]
   authored_by:
+    label: authored by
     inverse: authored
+    domain: [KnowledgeObject]
+    range: [Person, Organization]
   authored:
+    label: authored
     inverse: authored_by
+    domain: [Person, Organization]
+    range: [KnowledgeObject]
   affiliated_with:
+    label: affiliated with
     inverse: has_affiliate
+    domain: [Person, Organization]
+    range: [Organization]
   has_affiliate:
+    label: has affiliate
     inverse: affiliated_with
+    domain: [Organization]
+    range: [Person, Organization]
+  references:
+    label: references
+    inverse: referenced_by
+    domain: [KnowledgeObject]
+    range: [KnowledgeObject]
+  referenced_by:
+    label: referenced by
+    inverse: references
+    domain: [KnowledgeObject]
+    range: [KnowledgeObject]
