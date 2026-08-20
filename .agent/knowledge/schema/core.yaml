@@ -12,7 +12,7 @@ imports:
 classes:
   KnowledgeObject:
     description: Generic semantic object represented canonically in Markdown/YAML.
-    slots: [id, type, title, aliases, status, relations, timeline]
+    slots: [id, knowledge_schema, type, title, aliases, created, updated, status, redirect_to, relations, claims, timeline]
   Entity:
     is_a: KnowledgeObject
   Concept:
@@ -25,7 +25,7 @@ classes:
     is_a: Entity
   Source:
     is_a: KnowledgeObject
-    slots: [authority]
+    slots: [source_authority]
   Event:
     is_a: KnowledgeObject
   Decision:
@@ -33,11 +33,11 @@ classes:
   Artifact:
     is_a: KnowledgeObject
   Claim:
-    slots: [id, subject, predicate, object, derivation, status, evidence, event_time, transaction_time, confidence]
+    slots: [id, subject, predicate, object, derivation, status, evidence, valid_from, valid_to, recorded_at, event_time, transaction_time, extraction_confidence, claim_confidence, review_status, created_by, reviewed_by]
   Relation:
-    slots: [predicate, target, derivation, status, evidence, event_time, transaction_time, confidence]
+    slots: [predicate, target, derivation, status, evidence, valid_from, valid_to, recorded_at, event_time, transaction_time, extraction_confidence, claim_confidence, review_status, created_by, reviewed_by]
   Evidence:
-    slots: [source, locator_type, locator_value, authority]
+    slots: [source, locator_type, locator_value, source_authority]
   TimelineEntry:
     slots: [event_time, transaction_time, claim, source]
 
@@ -45,18 +45,30 @@ slots:
   id:
     identifier: true
     required: true
+  knowledge_schema:
+    description: Version of the agentic-vault knowledge schema applicable to the object.
   type:
     required: true
   title:
     required: true
   aliases:
     multivalued: true
+  created:
+    range: date
+  updated:
+    range: date
   status:
     range: LifecycleStatus
-  authority:
+  redirect_to:
+    range: string
+  source_authority:
     range: SourceAuthority
   relations:
     range: Relation
+    multivalued: true
+    inlined_as_list: true
+  claims:
+    range: Claim
     multivalued: true
     inlined_as_list: true
   timeline:
@@ -83,16 +95,33 @@ slots:
     range: LocatorType
   locator_value:
     range: string
+  valid_from:
+    range: date
+  valid_to:
+    range: date
+  recorded_at:
+    range: datetime
   event_time:
     range: date
   transaction_time:
     range: date
   claim:
     range: string
-  confidence:
+  extraction_confidence:
     range: float
     minimum_value: 0
     maximum_value: 1
+  claim_confidence:
+    range: float
+    minimum_value: 0
+    maximum_value: 1
+  review_status:
+    range: ReviewStatus
+  created_by:
+    range: string
+  reviewed_by:
+    multivalued: true
+
 
 enums:
   LifecycleStatus:
@@ -105,25 +134,33 @@ enums:
       retracted:
       retired:
       archived:
+      merged:
   Derivation:
     permissible_values:
       asserted:
       extracted:
       inferred:
       ambiguous:
+      imported:
   SourceAuthority:
     permissible_values:
       primary:
       secondary:
       tertiary:
       unknown:
+  ReviewStatus:
+    permissible_values:
+      unreviewed:
+      pending:
+      accepted:
+      rejected:
   LocatorType:
     permissible_values:
       file:
       heading:
-      block:
-      line:
+      obsidian-block:
+      line-range:
       url:
-      page:
+      pdf-page:
       timestamp:
       commit:
