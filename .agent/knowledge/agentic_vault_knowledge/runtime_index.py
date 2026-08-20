@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 from .advanced import EXTENDED_SQL, ExtendedKnowledgeIndex
-from .core import KnowledgeIndex, SCHEMA_SQL, ValidationIssue
+from .core import KnowledgeIndex, ParsedNote, SCHEMA_SQL, ValidationIssue
 
 NORMAL_FTS_SQL = "CREATE VIRTUAL TABLE objects_fts USING fts5(id UNINDEXED, title, body, aliases, tags)"
 EXPECTED_CLAIM_COLUMNS = {
@@ -56,6 +56,15 @@ class RuntimeIndex(ExtendedKnowledgeIndex):
         self.conn.execute("DROP TABLE IF EXISTS claims")
         self.conn.commit()
 
+    def upsert(self, note: ParsedNote) -> None:
+        """Upsert by stable identity, allowing files to move/rename safely."""
+        if note.semantic and note.object_id:
+            new_path = str(note.path).replace("\\", "/")
+            existing = self.conn.execute("SELECT path FROM objects WHERE id=?", (note.object_id,)).fetchone()
+            if existing and existing["path"] != new_path:
+                self._remove_path(existing["path"])
+        super().upsert(note)
+
     def resolve(self, ref: str) -> list[dict]:
         """Resolve IDs/aliases and follow explicit merge redirects safely."""
         results = KnowledgeIndex.resolve(self, ref)
@@ -67,7 +76,7 @@ class RuntimeIndex(ExtendedKnowledgeIndex):
             seen.add(current["id"])
             row = self.conn.execute("SELECT status,frontmatter_json FROM objects WHERE id=?", (current["id"],)).fetchone()
             if not row or row["status"] != "merged":
-                return current if isinstance(current, list) else [current]
+                return [current]
             fm = json.loads(row["frontmatter_json"])
             target = fm.get("redirect_to")
             if not target:
