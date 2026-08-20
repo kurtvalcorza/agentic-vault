@@ -7,7 +7,7 @@ from typing import Any
 
 from mcp.server import MCPServer
 
-from agentic_vault_knowledge.advanced import ExtendedKnowledgeIndex
+from agentic_vault_knowledge.runtime_index import RuntimeIndex
 from agentic_vault_knowledge.core import apply_patch, propose_frontmatter_patch, validate_patch, vault_roots
 
 VAULT_ROOT=Path(os.environ.get("AGENTIC_VAULT_ROOT",".")).resolve()
@@ -16,7 +16,7 @@ _,SCHEMA_ROOT,DB_PATH=vault_roots(VAULT_ROOT)
 mcp=MCPServer("agentic-vault-knowledge")
 
 def _with_index(fn):
-    with ExtendedKnowledgeIndex(DB_PATH) as idx:
+    with RuntimeIndex(DB_PATH) as idx:
         idx.build(VAULT_ROOT,SCHEMA_ROOT)
         return fn(idx)
 

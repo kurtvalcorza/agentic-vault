@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from .advanced import ExtendedKnowledgeIndex
+from .runtime_index import RuntimeIndex
 from .core import apply_patch, export_okf_like, propose_frontmatter_patch, validate_patch, validate_vault, vault_roots
 
 
@@ -32,7 +32,7 @@ def main() -> int:
         proposal=json.loads(Path(args.proposal).read_text(encoding="utf-8"))
         if args.cmd=="validate-patch": print(json.dumps([i.__dict__ for i in validate_patch(proposal,root)],indent=2)); return 0
         apply_patch(proposal,root); return 0
-    with ExtendedKnowledgeIndex(db) as idx:
+    with RuntimeIndex(db) as idx:
         if args.cmd=="build":
             issues=idx.rebuild(root,schema) if args.full else idx.build(root,schema); print(json.dumps([i.__dict__ for i in issues],indent=2)); return 1 if issues else 0
         idx.build(root,schema)
