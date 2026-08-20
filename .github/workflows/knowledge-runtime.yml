@@ -24,6 +24,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install --upgrade pip
-      - run: pip install -e './.agent/knowledge[test]'
+      - run: pip install -e './.agent/knowledge[test,linkml]'
       - run: pytest -q .agent/knowledge/tests
       - run: vault-knowledge --vault . validate
+      - run: vault-knowledge --vault . build --full
+      - run: vault-knowledge --vault . health
