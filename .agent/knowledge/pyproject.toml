@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentic-vault-knowledge"
+version = "0.1.0"
+description = "Generic, agent-agnostic knowledge runtime for agentic-vault"
+requires-python = ">=3.10"
+dependencies = [
+  "PyYAML>=6.0",
+  "mcp>=2,<3",
+]
+
+[project.optional-dependencies]
+linkml = ["linkml-runtime>=1.8", "linkml>=1.8"]
+test = ["pytest>=8"]
+
+[project.scripts]
+vault-knowledge = "agentic_vault_knowledge.cli:main"
+vault-knowledge-mcp = "agentic_vault_knowledge.mcp_server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agentic_vault_knowledge"]

@@ -1,0 +1,129 @@
+id: https://agentic-vault.example/schema/core
+name: agentic-vault-knowledge
+version: "0.1.0"
+prefixes:
+  linkml: https://w3id.org/linkml/
+  av: https://agentic-vault.example/schema/
+default_prefix: av
+default_range: string
+imports:
+  - linkml:types
+
+classes:
+  KnowledgeObject:
+    description: Generic semantic object represented canonically in Markdown/YAML.
+    slots: [id, type, title, aliases, status, relations, timeline]
+  Entity:
+    is_a: KnowledgeObject
+  Concept:
+    is_a: KnowledgeObject
+  Project:
+    is_a: Entity
+  Person:
+    is_a: Entity
+  Organization:
+    is_a: Entity
+  Source:
+    is_a: KnowledgeObject
+    slots: [authority]
+  Event:
+    is_a: KnowledgeObject
+  Decision:
+    is_a: KnowledgeObject
+  Artifact:
+    is_a: KnowledgeObject
+  Claim:
+    slots: [id, subject, predicate, object, derivation, status, evidence, event_time, transaction_time, confidence]
+  Relation:
+    slots: [predicate, target, derivation, status, evidence, event_time, transaction_time, confidence]
+  Evidence:
+    slots: [source, locator_type, locator_value, authority]
+  TimelineEntry:
+    slots: [event_time, transaction_time, claim, source]
+
+slots:
+  id:
+    identifier: true
+    required: true
+  type:
+    required: true
+  title:
+    required: true
+  aliases:
+    multivalued: true
+  status:
+    range: LifecycleStatus
+  authority:
+    range: SourceAuthority
+  relations:
+    range: Relation
+    multivalued: true
+    inlined_as_list: true
+  timeline:
+    range: TimelineEntry
+    multivalued: true
+    inlined_as_list: true
+  subject:
+    range: string
+  predicate:
+    required: true
+  object:
+    range: string
+  target:
+    range: string
+  derivation:
+    range: Derivation
+  evidence:
+    range: Evidence
+    multivalued: true
+    inlined_as_list: true
+  source:
+    range: string
+  locator_type:
+    range: LocatorType
+  locator_value:
+    range: string
+  event_time:
+    range: date
+  transaction_time:
+    range: date
+  claim:
+    range: string
+  confidence:
+    range: float
+    minimum_value: 0
+    maximum_value: 1
+
+enums:
+  LifecycleStatus:
+    permissible_values:
+      candidate:
+      proposed:
+      accepted:
+      active:
+      superseded:
+      retracted:
+      retired:
+      archived:
+  Derivation:
+    permissible_values:
+      asserted:
+      extracted:
+      inferred:
+      ambiguous:
+  SourceAuthority:
+    permissible_values:
+      primary:
+      secondary:
+      tertiary:
+      unknown:
+  LocatorType:
+    permissible_values:
+      file:
+      heading:
+      block:
+      line:
+      url:
+      page:
+      timestamp:
+      commit:

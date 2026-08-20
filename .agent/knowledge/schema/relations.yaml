@@ -1,0 +1,39 @@
+version: "0.1.0"
+relations:
+  related_to:
+    inverse: related_to
+    symmetric: true
+    description: Generic semantic association when a more specific predicate is unavailable.
+  part_of:
+    inverse: has_part
+    transitive: true
+  has_part:
+    inverse: part_of
+  depends_on:
+    inverse: dependency_of
+  dependency_of:
+    inverse: depends_on
+  supports:
+    inverse: supported_by
+  supported_by:
+    inverse: supports
+  contradicts:
+    inverse: contradicted_by
+  contradicted_by:
+    inverse: contradicts
+  supersedes:
+    inverse: superseded_by
+  superseded_by:
+    inverse: supersedes
+  derived_from:
+    inverse: source_for
+  source_for:
+    inverse: derived_from
+  authored_by:
+    inverse: authored
+  authored:
+    inverse: authored_by
+  affiliated_with:
+    inverse: has_affiliate
+  has_affiliate:
+    inverse: affiliated_with
