@@ -5,7 +5,9 @@ import json
 from pathlib import Path
 
 from .runtime_index import RuntimeIndex
-from .core import apply_patch, export_okf_like, propose_frontmatter_patch, validate_patch, validate_vault, vault_roots
+from .core import apply_patch, propose_frontmatter_patch, validate_patch, validate_vault, vault_roots
+from .interop import export_jsonld, export_okf_bundle, import_okf_candidates, validate_okf_bundle
+from .migrations import plan_migrations, schema_version
 
 
 def _root(value: str | None) -> Path: return Path(value or ".").resolve()
@@ -20,10 +22,16 @@ def main() -> int:
     n=sub.add_parser("neighbors"); n.add_argument("id"); n.add_argument("--predicate"); n.add_argument("--include-derived",action="store_true")
     t=sub.add_parser("trace"); t.add_argument("start"); t.add_argument("end"); t.add_argument("--max-depth",type=int,default=6)
     q=sub.add_parser("query"); q.add_argument("--type"); q.add_argument("--predicate"); q.add_argument("--target"); q.add_argument("--status",default="accepted"); q.add_argument("--limit",type=int,default=100)
-    sub.add_parser("contradictions"); e=sub.add_parser("export-okf"); e.add_argument("output")
+    sub.add_parser("contradictions")
+    eo=sub.add_parser("export-okf"); eo.add_argument("output")
+    vo=sub.add_parser("validate-okf"); vo.add_argument("bundle")
+    io=sub.add_parser("import-okf-candidates"); io.add_argument("bundle")
+    ej=sub.add_parser("export-jsonld"); ej.add_argument("output")
+    mp=sub.add_parser("plan-migrations"); mp.add_argument("from_version"); mp.add_argument("--to-version")
     pp=sub.add_parser("propose"); pp.add_argument("path"); pp.add_argument("patch_json")
     vp=sub.add_parser("validate-patch"); vp.add_argument("proposal"); ap=sub.add_parser("apply-patch"); ap.add_argument("proposal")
     args=p.parse_args(); root=_root(args.vault); _,schema,db=vault_roots(root)
+
     if args.cmd=="validate":
         issues=validate_vault(root); print(json.dumps([i.__dict__ for i in issues],indent=2)); return 1 if issues else 0
     if args.cmd=="propose":
@@ -32,6 +40,15 @@ def main() -> int:
         proposal=json.loads(Path(args.proposal).read_text(encoding="utf-8"))
         if args.cmd=="validate-patch": print(json.dumps([i.__dict__ for i in validate_patch(proposal,root)],indent=2)); return 0
         apply_patch(proposal,root); return 0
+    if args.cmd=="export-okf":
+        print(json.dumps(export_okf_bundle(root,(root/args.output).resolve()),indent=2)); return 0
+    if args.cmd=="validate-okf":
+        issues=validate_okf_bundle((root/args.bundle).resolve()); print(json.dumps(issues,indent=2)); return 1 if issues else 0
+    if args.cmd=="import-okf-candidates":
+        print(json.dumps(import_okf_candidates((root/args.bundle).resolve()),indent=2,ensure_ascii=False)); return 0
+    if args.cmd=="plan-migrations":
+        target=args.to_version or schema_version(root); print(json.dumps(plan_migrations(root,args.from_version,target),indent=2)); return 0
+
     with RuntimeIndex(db) as idx:
         if args.cmd=="build":
             issues=idx.rebuild(root,schema) if args.full else idx.build(root,schema); print(json.dumps([i.__dict__ for i in issues],indent=2)); return 1 if issues else 0
@@ -50,7 +67,7 @@ def main() -> int:
         elif args.cmd=="central": out=idx.central_objects()
         elif args.cmd=="query": out=idx.query(args.type,args.predicate,args.target,args.status,args.limit)
         elif args.cmd=="contradictions": out=idx.contradiction_candidates()
-        elif args.cmd=="export-okf": export_okf_like(idx,(root/args.output).resolve()); out={"written":args.output}
+        elif args.cmd=="export-jsonld": out=export_jsonld(idx,(root/args.output).resolve())
         else: raise SystemExit(2)
         print(json.dumps(out,indent=2,ensure_ascii=False,default=str)); return 0
 
