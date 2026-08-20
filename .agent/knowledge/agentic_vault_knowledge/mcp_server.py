@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,7 @@ from mcp.server import MCPServer
 
 from agentic_vault_knowledge.runtime_index import RuntimeIndex
 from agentic_vault_knowledge.core import apply_patch, propose_frontmatter_patch, validate_patch, vault_roots
+from agentic_vault_knowledge.retrieval import fused_search
 from agentic_vault_knowledge.transactions import apply_batch, validate_batch
 from agentic_vault_knowledge.validation import validate_vault_semantics
 
@@ -36,6 +38,10 @@ def knowledge_resolve_entity(ref:str)->list[dict[str,Any]]: return _with_index(l
 @mcp.tool()
 def knowledge_search(query:str,limit:int=20)->list[dict[str,Any]]: return _with_index(lambda i:i.search(query,limit))
 @mcp.tool()
+def knowledge_retrieve(query:str,limit:int=20,graph_expand:bool=True)->list[dict[str,Any]]:
+    """Fused lexical + graph retrieval; optional vector/reranker adapters can plug into the library contract without becoming canonical."""
+    return _with_index(lambda i:fused_search(i,query,limit,graph_expand=graph_expand))
+@mcp.tool()
 def knowledge_get(object_id:str)->dict[str,Any]|None: return _with_index(lambda i:i.get(object_id))
 @mcp.tool()
 def knowledge_neighbors(object_id:str,predicate:str|None=None,include_derived:bool=False)->list[dict[str,Any]]: return _with_index(lambda i:i.neighbors(object_id,predicate,include_derived))
@@ -60,7 +66,17 @@ def knowledge_communities()->list[dict[str,Any]]: return _with_index(lambda i:i.
 @mcp.tool()
 def knowledge_impact(object_id:str,max_depth:int=3)->list[dict[str,Any]]: return _with_index(lambda i:i.impact(object_id,max_depth))
 @mcp.tool()
-def knowledge_health()->dict[str,Any]: return _with_index(lambda i:i.health())
+def knowledge_health()->dict[str,Any]:
+    """Refresh the disposable index and return runtime + validation diagnostics."""
+    def report(idx):
+        health=idx.health()
+        issues=validate_vault_semantics(VAULT_ROOT,SCHEMA_ROOT)
+        counts=Counter(i.code for i in issues)
+        health["validation"]={"errors":sum(i.severity=="error" for i in issues),"warnings":sum(i.severity=="warning" for i in issues),"by_code":dict(sorted(counts.items()))}
+        health["read_only"] = READ_ONLY
+        health["index_fresh"] = True
+        return health
+    return _with_index(report)
 
 @mcp.tool()
 def knowledge_propose_patch(relative_path:str,patch:dict[str,Any])->dict[str,Any]:
