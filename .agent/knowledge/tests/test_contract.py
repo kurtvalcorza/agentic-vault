@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 import pytest
@@ -58,6 +57,8 @@ claims:
     object: entity:gamma
     status: proposed
     derivation: inferred
+    valid_from: 2026-01-01
+    recorded_at: 2026-01-02T00:00:00+00:00
     extraction_confidence: 0.91
     claim_confidence: 0.62
 ---
@@ -184,7 +185,6 @@ def test_temporal_contradictions_require_overlapping_validity(vault: Path) -> No
     with RuntimeIndex(vault / ".agent/knowledge/generated/knowledge.db") as idx:
         idx.build(vault, vault / ".agent/knowledge/schema")
         assert idx.contradiction_candidates() == []
-        # Move the later claim into the first claim's validity window.
         alpha.write_text(alpha.read_text(encoding="utf-8").replace("valid_from: 2026-07-01", "valid_from: 2026-06-01"), encoding="utf-8")
         idx.build(vault, vault / ".agent/knowledge/schema")
         assert any(c.get("left_claim") or c.get("right_claim") for c in idx.contradiction_candidates())
