@@ -1409,3 +1409,78 @@ def test_rdf_export_refuses_unowned_existing_file(vault: Path) -> None:
         assert "urn:foreign" in target.read_text(encoding="utf-8")
         export_rdf_ntriples(idx, target, overwrite=True)
         export_rdf_ntriples(idx, target)  # now owned -> allowed
+
+
+# --- Object ID contract -------------------------------------------------------
+# The `namespace:value` rule is enforced in core.validate_note, and was pinned by
+# no test. That gap is how "strict ID validation" came to be listed as missing
+# work twice: grepping validation.py finds nothing, because the check lives in
+# core.py. These tests make the contract visible and stop it drifting.
+
+VALID_IDS = [
+    "concept:example-topic",
+    "project:sample-project",
+    "source:how-to-take-smart-notes",
+    "source:doi:10.1234/journal.2026",  # a further colon inside the value is legitimate
+    "entity:alpha_1",
+]
+
+# Rejected by the id rule itself: these parse as YAML strings, then fail the
+# `namespace:value` regex.
+INVALID_IDS = [
+    ("noColon", "missing the namespace separator"),
+    (":value", "empty namespace"),
+    ("Concept:Foo", "namespace must be lowercase"),
+    ("1concept:x", "namespace must not start with a digit"),
+    ("concept:has space", "whitespace is not allowed"),
+]
+
+# Rejected one layer earlier, by the YAML parser: a trailing colon makes the
+# value a nested mapping rather than a string, so the note never reaches the id
+# rule. Still rejected — and because builds fail closed (ADR-0005), still fatal
+# — but under `parse-error`, not `invalid-id`.
+MALFORMED_YAML_IDS = [
+    ("concept:", "trailing colon is a YAML scanner error, not a bad identifier"),
+]
+
+
+def _codes_for_id(vault: Path, object_id: str) -> set[str]:
+    note = "---\nid: {}\ntype: Entity\ntitle: Alpha\n---\n# Alpha\n".format(object_id)
+    (vault / "02_Areas/Synthetic/Alpha.md").write_text(note, encoding="utf-8")
+    return {item.code for item in validate_vault_semantics(vault, _schema(vault))}
+
+
+@pytest.mark.parametrize("object_id", VALID_IDS)
+def test_valid_object_ids_accepted(vault: Path, object_id: str) -> None:
+    assert "invalid-id" not in _codes_for_id(vault, object_id)
+
+
+@pytest.mark.parametrize("object_id,reason", INVALID_IDS)
+def test_invalid_object_ids_rejected(vault: Path, object_id: str, reason: str) -> None:
+    assert "invalid-id" in _codes_for_id(vault, object_id), "should reject: " + reason
+
+
+@pytest.mark.parametrize("object_id,reason", MALFORMED_YAML_IDS)
+def test_malformed_id_syntax_caught_by_the_parser(vault: Path, object_id: str, reason: str) -> None:
+    """Documents which layer rejects these, so the distinction is not lost.
+
+    Both are still fatal — the build fails closed — but attributing them to
+    `invalid-id` would be wrong and would send someone looking in the wrong
+    place for the rule that stopped them.
+    """
+    assert "parse-error" in _codes_for_id(vault, object_id), "should reject: " + reason
+
+
+def test_id_rule_only_applies_to_semantic_notes(vault: Path) -> None:
+    """A note with no `id` is non-semantic and must not be judged by this rule.
+
+    This is the behaviour that lets an existing vault adopt the runtime
+    incrementally: ordinary notes keep whatever `type:` convention they already
+    use until they opt in by gaining an `id`.
+    """
+    (vault / "02_Areas/Synthetic/Alpha.md").write_text(
+        "---\ntype: book\ntitle: Not Semantic\n---\n# Plain\n", encoding="utf-8"
+    )
+    assert "invalid-id" not in {
+        item.code for item in validate_vault_semantics(vault, _schema(vault))
+    }
