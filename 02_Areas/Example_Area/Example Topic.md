@@ -1,5 +1,5 @@
 ---
-id: concept:zettelkasten
+id: concept:example-topic
 type: Concept
 title: Example Topic
 status: active
@@ -44,6 +44,13 @@ timeline:
 > - `claims:` — **inferred** and `proposed`. Something derived this; nothing has confirmed it. It stays a candidate until a person accepts it, which is why `knowledge.health` reports accepted and candidate claims separately.
 >
 > That distinction is the whole point of the runtime: a confident guess never silently becomes canonical knowledge.
+>
+> The two also have **separate provenance queries**, and this note is deliberately built so you can tell them apart. Both cite the same source, so the wrong query still returns a plausible-looking answer:
+>
+> - `knowledge.sources("concept:example-topic")` → evidence for the **accepted relation** only.
+> - `knowledge.claim_sources("claim:linking-beats-collecting")` → evidence for the **proposed claim**.
+>
+> Asking `sources` about a claim silently reports the relation's evidence instead. Trace a claim with `claim_sources`.
 
 An **Area** is a long-term commitment with no end date — a discipline you maintain rather than a deliverable you finish. Notes here follow Zettelkasten principles: one idea per note, densely linked.
 

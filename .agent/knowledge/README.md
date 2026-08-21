@@ -96,6 +96,13 @@ A note with a non-schema `type` and no `id` is simply non-semantic and is left
 alone. Adding `id` to it is what turns a harmless key into a build failure, so
 migrate `type` values as you adopt `id`, not before.
 
+Migrate by **moving** the old meaning, not overwriting it.
+`03_Resources/Reading-List/How to Take Smart Notes.md` is the worked example: it
+used `type: book` and `status: reading`, both rejected by the schema. `type` and
+`status` now hold schema values and the originals live on as `resource_type` and
+`reading_status`, so the note is queryable by the runtime without losing what it
+already recorded.
+
 **3. The build fails closed, so scan scope is a correctness question.** One
 unparseable file blocks the entire index. Dot-directories are never scanned —
 `.git`, `.venv`, `.obsidian`, `.github`, and every agent workspace (`.agent`,

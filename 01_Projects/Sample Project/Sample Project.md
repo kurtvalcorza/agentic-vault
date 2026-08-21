@@ -8,7 +8,7 @@ deadline: 2026-07-01
 tags: [project/sample, status/active]
 relations:
   - predicate: depends_on
-    target: concept:zettelkasten
+    target: concept:example-topic
     derivation: asserted
     status: accepted
 timeline:
@@ -22,7 +22,7 @@ timeline:
 
 > Seed example — a minimal project note showing the conventions. Delete once you've made your own.
 >
-> Its `relations:` edge is what makes `knowledge.trace_path` return something on a fresh clone: this project → `concept:zettelkasten` → `source:how-to-take-smart-notes`. A `[[WikiLink]]` alone would not — links are navigation, `relations:` are typed semantics, and the runtime counts them separately.
+> Its `relations:` edge is what makes `knowledge.trace_path` return something on a fresh clone: this project → `concept:example-topic` → `source:how-to-take-smart-notes`. A `[[WikiLink]]` alone would not — links are navigation, `relations:` are typed semantics, and the runtime counts them separately.
 
 **Goal:** Ship one deliverable that demonstrates the vault's project workflow end-to-end.
 
