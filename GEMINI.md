@@ -1,7 +1,7 @@
 # Gemini CLI: Vault Instructions
 
 > **Source of Truth:** This file is a **derived digest** of [[AGENTS.md]]. Refer to [[AGENTS.md]] for the canonical version of all protocols. If anything here conflicts with AGENTS.md, AGENTS.md wins.
-> **Synced with AGENTS.md version:** 1.3
+> **Synced with AGENTS.md version:** 1.4
 
 ## Project Overview
 This is the personal knowledge management (PKM) vault of **{{OWNER_NAME}}**. It uses a **Hybrid PARA + Zettelkasten** structure to organize projects, long-term knowledge, and references.
@@ -34,7 +34,15 @@ This is the personal knowledge management (PKM) vault of **{{OWNER_NAME}}**. It 
 - Session-end snapshots run `.agent/scripts/vault-git-commit.ps1` (other agents' hooks trigger this automatically; Gemini sessions may run it manually at end of work).
 - **NEVER commit secrets** or nested git repos.
 
-### 5. Security & Standards
+### 5. Knowledge Runtime & MCP (optional — read AGENTS.md § Knowledge Runtime & MCP before use)
+- `.agent/knowledge/` is an **optional** typed knowledge layer: a disposable SQLite projection of the Markdown (entities, relations, claims, evidence, provenance, graph). Markdown stays canonical. **If it is not installed, fall back to ordinary vault search rather than blocking.**
+- **`objects: 0` is expected** on an existing vault — a note joins the semantic graph only when it has **both** `id` and `type`. Everything else is still indexed for navigation.
+- The build **fails closed**: one unparseable file blocks the whole index. Dot-directories are skipped automatically; drop a `.knowledge-ignore` file in any *non-dot* scaffolding tree.
+- **Writes are off by default.** `knowledge_apply_patch` / `knowledge_apply_batch` raise unless `AGENTIC_VAULT_KNOWLEDGE_READ_ONLY=0`. Enabling that edits canonical Markdown — an outward state change; confirm with the owner first.
+- Never edit the generated database as knowledge; it is derived and rebuildable.
+- **Connecting any MCP server to this vault:** check its write surface first — some expose ungated file delete/overwrite, and git only snapshots at session end. Never copy credentials into `.mcp.json` or other tracked config.
+
+### 6. Security & Standards
 - **PII/Secrets**: Never store API keys or unmasked PII in markdown notes.
 - **Tone**: Professional for `01_Projects/`, `02_Areas/`, `03_Resources/`, `.agent/outputs/`; casual for `Inbox/` and personal notes. House voice → `.agent/steering/voice.md`; what to avoid → `.agent/steering/anti-style.md`.
 

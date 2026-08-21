@@ -151,7 +151,7 @@ Not all steering files need to be read on every session. Priority levels:
 | :--- | :--- | :--- |
 | **Always** | Every session, before any work | `AGENTS.md` (this file), today's session log, `memory-hot-cache.md` |
 | **On relevant action** | Before performing the matching action | `skills-standard.md` (creating/editing skills), `file-naming-conventions.md` (creating files), `tag-taxonomy.md` (applying tags), `security-best-practices.md` (external integrations), `session-continuity.md` (logging), `bi-temporal-tracking.md` (updating entity frontmatter: `role`, `status`, `company`, `affiliation`), `two-output-rule.md` (invoking a skill with `two_output: true`), `voice.md` + `anti-style.md` (drafting any external-facing or substantial output), `ultramode.md` (before substantive multi-step work — audits, builds, multi-file changes) |
-| **On first encounter** | First time in a session the topic arises | `conversational-interface.md`, `scripts-and-qa.md`, `kiro-integration.md` |
+| **On first encounter** | First time in a session the topic arises | `conversational-interface.md`, `scripts-and-qa.md`, `kiro-integration.md`, the **Knowledge Runtime & MCP** section below (before invoking any `knowledge_*` tool or connecting an MCP server to this vault) |
 
 Agents SHOULD NOT preload all steering files at session start. Read them when the action demands it.
 
@@ -170,6 +170,34 @@ Agents SHOULD NOT preload all steering files at session start. Read them when th
 11. **Obsidian CLI**: For vault-level operations (batch search, orphan detection, plugin management), use the `obsidian-cli` skill — not raw file-system tools.
 12. **Local Git Snapshots**: The vault root is a local git repo (notes + config scope). Commits run **automatically at session end** via `.agent/scripts/vault-git-commit.ps1`. Never commit secrets or nested repos. See **Version Control** below.
 13. **Audit Cadence**: Quarterly stack audit. On/after a quarter boundary (Mar 1 / Jun 1 / Sep 1 / Dec 1), check `System/AUDIT-LOG.md`; if there's no entry for the current quarter, prompt to run `optimize-workspace`. Pruning is human-gated — the audit proposes, the owner approves. See **Audit Cadence** below.
+14. **Knowledge Runtime**: Optional typed knowledge layer in `.agent/knowledge/`. If installed, prefer it over manual graph reconstruction; mutations are proposal-first and **writes are off by default**. See **Knowledge Runtime & MCP** below.
+
+## Knowledge Runtime & MCP
+
+`.agent/knowledge/` is an **optional** Python subsystem that builds a disposable SQLite/FTS projection of the vault's Markdown — typed entities, relations, claims, evidence, provenance, bi-temporal state, and graph analytics. Markdown/YAML stays canonical; the projection is gitignored (`.agent/knowledge/generated/`) and rebuildable at any time. If it is not installed, fall back to ordinary vault search rather than blocking.
+
+Full detail: `.agent/knowledge/README.md`. The agent-facing contract is the `knowledge-runtime` skill.
+
+### Working with it
+
+- **Install** (from the vault root): `python -m pip install -e './.agent/knowledge[test,linkml]'`, or `uv pip install -e ...` for a uv-managed venv, which ships no `pip`.
+- **Build**: `vault-knowledge --vault . build`. The build **fails closed** — one unparseable file blocks the whole index, so scan scope is a correctness concern. Dot-directories are skipped automatically; drop a `.knowledge-ignore` file in any *non-dot* tree that holds scaffolding rather than notes (archived skill backups, generated exports, vendored docs).
+- **`objects: 0` is the expected first result** on an existing vault, not a failure. A note joins the semantic graph only when it carries **both** `id` and `type`; everything else is still indexed for navigation.
+- **`type` collides with a common Obsidian convention.** The schema needs a class name (`Project`, `Concept`, `Source`, …), while many vaults already use `type: book` / `type: guide`. Adding an `id` to such a note turns a harmless key into a build failure. Migrate by *moving* the old meaning to another field, not overwriting it.
+- **Never edit the generated database as knowledge.** It is derived and disposable.
+
+### MCP
+
+The runtime exposes 22 `knowledge_*` tools over stdio via `.agent/scripts/vault-knowledge-mcp.py`, which resolves the vault root from its own location. Wire it with `.mcp.json.example` — copy to `.mcp.json` (gitignored) and use **absolute paths**, since a client may spawn the server from any working directory. Config location and schema are harness-specific; see the table in `.agent/knowledge/README.md`.
+
+> **Writes are off by default.** `knowledge_apply_patch` / `knowledge_apply_batch` raise unless `AGENTIC_VAULT_KNOWLEDGE_READ_ONLY=0`. Enabling that lets an agent edit canonical Markdown — treat it as an **outward state change** and confirm with the owner first, per Security & Privacy Protocols.
+
+### Adding other MCP servers
+
+The same rules apply to any MCP server pointed at this vault, and two are worth stating explicitly because they are easy to get wrong:
+
+- **Check the write surface before connecting.** Some servers (notably ones that drive a live Obsidian instance through the Local REST API) expose ungated file delete/overwrite tools. Since git snapshots only run at session end, a destroy-and-recreate inside one session leaves no restore point. Treat destructive calls as requiring explicit owner confirmation.
+- **Never copy credentials into `.mcp.json` or any tracked config.** Read them at runtime from their own gitignored location, as `vault-knowledge-mcp.py` does for its vault root.
 
 ## Version Control (Local Git)
 
@@ -214,4 +242,4 @@ The vault stack gets a **quarterly audit** — prune what drifts, keep what comp
 - Full glossary: `System/memory/glossary.md` | Profiles: `System/memory/people/` | Projects: `System/memory/projects/`
 
 ---
-**Last Updated:** {{DATE}} | **Version:** 1.3 (Added the **Agent Operating Method (Ultramode)** section — an always-loaded kernel summarizing a portable behavioral standard for all agents (verify-first, re-verify delegated/second-hand claims, decision-gate, terse-and-numeric), with full detail in `.agent/steering/ultramode.md`, a `/ultramode` slash command, and a Steering File Priority row. It buys auditability + an edge-case margin, not baseline correctness; protocol and voice still win on conflict)
+**Last Updated:** {{DATE}} | **Version:** 1.4 (Added the **Knowledge Runtime & MCP** section — the optional `.agent/knowledge/` typed knowledge layer was shipped without any mention in the constitution. Covers install, fail-closed builds and `.knowledge-ignore` scan scope, why `objects: 0` is the expected first result on an existing vault, the collision between the schema's `type` and the ordinary Obsidian `type:` key, MCP wiring via `.agent/scripts/vault-knowledge-mcp.py` with absolute paths, and the read-only-by-default write gate. Adds guidance for connecting *any* MCP server to a vault: check the write surface first, and never copy credentials into tracked config. Plus Operational Protocol 14 and a Steering File Priority row.)
