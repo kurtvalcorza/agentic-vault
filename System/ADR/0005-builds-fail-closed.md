@@ -1,6 +1,7 @@
 # 0005 — Builds fail closed on parse errors
 
 **Status:** Accepted
+**Related:** [[0001-markdown-is-canonical]] · [[0003-content-based-fingerprint]] · [[0006-writes-off-by-default-everywhere]] · [[AGENTS.md]]
 
 ## Context
 
@@ -19,6 +20,18 @@ Stop. A parse error anywhere fails the whole build and the index is not updated.
 
 - The index is never quietly partial. A query cannot return "no results" because
   a file failed to parse three days ago and nobody noticed.
+- **`build --full` is an exception, and it is not currently safe.**
+  `RuntimeIndex.rebuild()` closes the connection and `unlink()`s the database
+  *before* parsing anything, so a full rebuild that then hits a parse error
+  leaves no index at all — the previous valid projection is already gone. The
+  incremental `build()` path does not have this problem.
+  This is availability loss, not data loss: Markdown remains canonical
+  ([[0001-markdown-is-canonical]]) and the projection is reconstructible once the
+  offending file is fixed. But "a failed build leaves the previous index intact"
+  is **false for `--full`**, and the CI workflow uses `--full`.
+  Fixing it means building into a temporary database and swapping on success;
+  that is a behaviour change and belongs in its own change, not in the record
+  that documents the current state.
 - **Scan scope becomes a correctness concern**, not a performance one. This is
   why dot-directories are excluded by rule and why `.knowledge-ignore` exists
   for non-dot scaffolding trees.

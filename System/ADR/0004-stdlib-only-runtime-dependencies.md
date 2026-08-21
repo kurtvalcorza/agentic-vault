@@ -1,6 +1,7 @@
 # 0004 — Minimal runtime dependencies
 
 **Status:** Accepted
+**Related:** [[0002-sqlite-for-the-projection]] · [[0003-content-based-fingerprint]] · [[AGENTS.md]]
 
 ## Context
 

@@ -41,9 +41,17 @@ reversed is more useful than no record.
 
 | ADR | Title | Status |
 |:---|:---|:---|
-| [0001](0001-markdown-is-canonical.md) | Markdown/YAML is canonical; projections are disposable | Accepted |
-| [0002](0002-sqlite-for-the-projection.md) | SQLite/FTS for the derived projection | Accepted |
-| [0003](0003-content-based-fingerprint.md) | Content-based rebuild fingerprint | Accepted |
-| [0004](0004-stdlib-only-runtime-dependencies.md) | Minimal runtime dependencies | Accepted |
-| [0005](0005-builds-fail-closed.md) | Builds fail closed on parse errors | Accepted |
-| [0006](0006-writes-off-by-default-everywhere.md) | Canonical writes off by default on every entry point | Accepted |
+| [[0001-markdown-is-canonical]] | Markdown/YAML is canonical; projections are disposable | Accepted |
+| [[0002-sqlite-for-the-projection]] | SQLite/FTS for the derived projection | Accepted |
+| [[0003-content-based-fingerprint]] | Content-based rebuild fingerprint | Accepted |
+| [[0004-stdlib-only-runtime-dependencies]] | Minimal runtime dependencies | Accepted |
+| [[0005-builds-fail-closed]] | Builds fail closed on parse errors | Accepted |
+| [[0006-writes-off-by-default-everywhere]] | Canonical writes off by default on every entry point | Accepted |
+
+## Related
+
+- [[AGENTS.md]] — the protocols these decisions sit under
+- [[02_Areas/AREA-INDEX]] — long-term authored knowledge
+- `.agent/knowledge/README.md` — the runtime these records describe
+- `.agent/knowledge/tests/test_performance.py` — the measurements several of
+  them cite

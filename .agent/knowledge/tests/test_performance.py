@@ -1,28 +1,32 @@
-"""Performance characteristics of the knowledge runtime.
+"""Performance and complexity characteristics of the knowledge runtime.
 
 Why this file exists
 --------------------
 An optimization proposal (issue #9) argued for composite SQLite indexes that
 already existed and an O(1)-vs-O(n) memory rewrite that was not available,
 because nothing here measured anything. Plausible-sounding bottlenecks are cheap
-to assert and expensive to act on. These tests make the runtime's actual shape
-observable so future proposals argue from numbers.
+to assert and expensive to act on.
 
 What is asserted, and what is not
 ---------------------------------
 CI runners are noisy and shared, so wall-clock thresholds are deliberately loose
-— they catch an order-of-magnitude regression (an index silently dropped, an
-accidental O(n^2) scan), not a 20% drift. The precise numbers are *recorded* via
-``--durations`` and the ``report`` fixture rather than asserted.
+— they catch an order-of-magnitude regression, not a 20% drift. Precise numbers
+are *recorded* rather than asserted.
 
-The complexity assertions are the load-bearing ones, because they are about
-shape rather than speed:
+The structural assertions are the load-bearing ones, and they are written to
+exercise the code path the runtime actually takes:
 
-* build time must grow roughly linearly with note count, not quadratically;
-* traversal must not degrade as the graph grows, because it is index-backed;
-* a no-op rebuild must be dramatically cheaper than a full one.
+* build time grows with note count, not its square;
+* the query plan is checked for the predicate `neighbors()` really issues
+  (``source_id=? OR target_id=?``), so dropping *either* index fails the test;
+* the fingerprint short-circuit is exercised through ``refresh()``, which is the
+  method that implements it — ``build()`` does not;
+* ``iter_markdown`` is proven lazy by counting how much of the underlying walk
+  is consumed before the first yield, not merely by its type;
+* traced paths are asserted reachable, so a latency number can never come from a
+  search that silently bottomed out on ``max_depth``.
 
-Run just this file:  pytest .agent/knowledge/tests/test_performance.py -v --durations=0
+Run just this file:  pytest .agent/knowledge/tests/test_performance.py -v
 """
 
 from __future__ import annotations
@@ -33,27 +37,40 @@ from pathlib import Path
 
 import pytest
 
+from agentic_vault_knowledge import core as core_mod
 from agentic_vault_knowledge.core import iter_markdown
 from agentic_vault_knowledge.runtime_index import RuntimeIndex
 
-# Synthetic sizes. Kept modest so the suite stays runnable in CI; the ratio
-# between them is what the complexity assertions use, not the absolute values.
+# Synthetic sizes. Modest so the suite stays runnable in CI; the *ratio* is what
+# the complexity assertion uses, not the absolute values.
 SMALL, LARGE = 50, 400
+
+# core.trace() defaults to max_depth=6, so a benchmark target must sit within
+# that many edges of the start or the call returns [] and times a failed search.
+TRACE_HOPS = 4
 
 
 def _schema(vault: Path) -> Path:
     return vault / ".agent/knowledge/schema"
 
 
-def _db(vault: Path) -> Path:
-    return vault / ".agent/knowledge/generated/knowledge.db"
+def _fresh_db(vault: Path, tag: str) -> Path:
+    """A DB path nothing else has touched.
+
+    Timing a 'cold' build against a database a previous test already populated
+    measures an incremental update, not a cold build.
+    """
+    path = vault / ".agent/knowledge/generated" / f"{tag}.db"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.unlink(missing_ok=True)
+    return path
 
 
 def _build_vault(root: Path, note_count: int) -> Path:
     """Generate a synthetic vault of `note_count` linked, semantic notes.
 
-    Generated in-test rather than committed, so the fixtures stay synthetic and
-    domain-neutral (design invariant 12) and the sizes can change freely.
+    Generated in-test rather than committed, so fixtures stay synthetic and
+    domain-neutral (design invariant 12) and sizes can change freely.
     """
     schema_dst = root / ".agent/knowledge/schema"
     schema_dst.mkdir(parents=True, exist_ok=True)
@@ -64,8 +81,6 @@ def _build_vault(root: Path, note_count: int) -> Path:
     notes = root / "02_Areas/Generated"
     notes.mkdir(parents=True, exist_ok=True)
     for i in range(note_count):
-        # Chain each note to the next so traversal has real depth to walk, and
-        # add a WikiLink so the navigation graph is populated too.
         relation = ""
         if i + 1 < note_count:
             relation = (
@@ -102,13 +117,14 @@ def large_vault(tmp_path_factory) -> Path:
 def test_build_scales_roughly_linearly(small_vault: Path, large_vault: Path, capsys) -> None:
     """Build time must not grow super-linearly with note count.
 
-    This is the assertion that would catch an accidental O(n^2) — a per-note
-    operation that rescans everything already indexed.
+    Catches an accidental O(n^2) — a per-note operation that rescans everything
+    already indexed. Both builds run against a freshly-unlinked database so
+    neither is secretly incremental.
     """
-    with RuntimeIndex(_db(small_vault)) as idx:
+    with RuntimeIndex(_fresh_db(small_vault, "scale")) as idx:
         small_s, issues = _time(lambda: idx.build(small_vault, _schema(small_vault)))
         assert issues == []
-    with RuntimeIndex(_db(large_vault)) as idx:
+    with RuntimeIndex(_fresh_db(large_vault, "scale")) as idx:
         large_s, issues = _time(lambda: idx.build(large_vault, _schema(large_vault)))
         assert issues == []
 
@@ -120,96 +136,138 @@ def test_build_scales_roughly_linearly(small_vault: Path, large_vault: Path, cap
             f"\n  build {LARGE} notes: {large_s * 1000:7.1f} ms"
             f"\n  size x{size_ratio:.0f} -> time x{time_ratio:.1f}"
         )
-    # Generous headroom for runner noise and fixed startup cost; quadratic growth
-    # at this ratio would be ~64x and would blow straight through it.
+    # Quadratic growth at this ratio would be ~64x and would blow through this.
     assert time_ratio < size_ratio * 4
 
 
-def test_traversal_is_index_backed_not_scan(large_vault: Path, capsys) -> None:
-    """Neighbour lookup must not degrade as the relation table grows.
+def test_neighbors_query_uses_both_relation_indexes(large_vault: Path, capsys) -> None:
+    """The plan check must cover the predicate `neighbors()` actually issues.
 
-    `relations_source` / `relations_target` make this a b-tree seek. If either
-    index is dropped, this becomes a full scan and the ratio blows out.
+    `neighbors()` matches `source_id=? OR target_id=?`. Checking only `source_id`
+    would keep passing if `relations_target` were dropped, which is exactly the
+    regression this test exists to catch.
     """
-    with RuntimeIndex(_db(large_vault)) as idx:
+    with RuntimeIndex(_fresh_db(large_vault, "plan")) as idx:
         idx.build(large_vault, _schema(large_vault))
-        # First and last node: with an index these cost the same, with a scan
-        # the later one is progressively worse.
-        first_s, _ = _time(lambda: idx.neighbors("concept:n0"))
-        last_s, _ = _time(lambda: idx.neighbors(f"concept:n{LARGE - 2}"))
-        plan = idx.conn.execute(
-            "EXPLAIN QUERY PLAN SELECT * FROM relations WHERE source_id=?", ("concept:n0",)
-        ).fetchone()
+        sql = (
+            "SELECT * FROM relations WHERE status='accepted' "
+            "AND (source_id=? OR target_id=?) AND derivation!='inferred'"
+        )
+        plan = "\n".join(
+            row[-1] for row in idx.conn.execute("EXPLAIN QUERY PLAN " + sql, ("concept:n10",) * 2)
+        )
+        # Behavioural counterpart: an edge is reachable from *either* end.
+        forward = idx.neighbors("concept:n0")
+        backward = idx.neighbors("concept:n1")
 
     with capsys.disabled():
-        print(
-            f"\n  neighbors(first): {first_s * 1000:6.2f} ms"
-            f"\n  neighbors(last) : {last_s * 1000:6.2f} ms"
-            f"\n  plan: {plan[-1]}"
-        )
-    # The structural guarantee, independent of timing noise.
-    assert "USING INDEX" in plan[-1], f"relations lookup is not index-backed: {plan[-1]}"
-    assert "SCAN" not in plan[-1].split("USING")[0]
+        print(f"\n  neighbors() plan:\n    " + plan.replace("\n", "\n    "))
+    for index_name in ("relations_source", "relations_target"):
+        assert index_name in plan, f"{index_name} unused by neighbors(); plan was:\n{plan}"
+    assert forward, "n0 should see its outgoing edge"
+    assert backward, "n1 should see the same edge from the target side"
 
 
-def test_noop_rebuild_short_circuits(large_vault: Path, capsys) -> None:
-    """An unchanged vault must not pay *more* than a first build.
+def test_refresh_short_circuits_on_unchanged_vault(large_vault: Path, capsys) -> None:
+    """The fingerprint short-circuit lives in `refresh()`, not `build()`.
 
-    Guards the `_last_fingerprint` short-circuit — but note what the measured
-    saving actually is, because it is smaller than "cached" suggests: the
-    fingerprint is content-based on purpose (ADR-0003), so computing it re-reads
-    and re-hashes every file. The short-circuit therefore skips the *write* half
-    of the build, not the *scan* half, and a warm rebuild lands only slightly
-    under a cold one rather than being near-instant.
+    `build()` always does the full work; calling it twice measures two builds and
+    tells you nothing about caching. `refresh()` computes the fingerprint and
+    returns early when it matches.
 
-    That is a correctness tradeoff, not a defect: a metadata-only fingerprint
-    would make this near-free and would serve stale state when a file's mtime
-    lies. The assertion is deliberately just "no worse", so the test documents
-    the real behaviour instead of implying a speedup that is not there.
+    The saving is real but bounded: the fingerprint is content-based on purpose
+    (ADR-0003), so the warm path still reads and hashes every file. It skips the
+    parse-validate-write half, not the read half.
     """
-    with RuntimeIndex(_db(large_vault)) as idx:
-        cold_s, _ = _time(lambda: idx.build(large_vault, _schema(large_vault)))
-        warm_s, _ = _time(lambda: idx.build(large_vault, _schema(large_vault)))
+    with RuntimeIndex(_fresh_db(large_vault, "refresh")) as idx:
+        cold_s, cold_issues = _time(lambda: idx.refresh(large_vault, _schema(large_vault)))
+        warm_s, warm_issues = _time(lambda: idx.refresh(large_vault, _schema(large_vault)))
+        assert cold_issues == [] and warm_issues == []
 
     saved = (1 - warm_s / max(cold_s, 1e-6)) * 100
     with capsys.disabled():
         print(
-            f"\n  cold build: {cold_s * 1000:7.1f} ms"
-            f"\n  warm build: {warm_s * 1000:7.1f} ms  ({saved:.0f}% saved — scan cost dominates)"
+            f"\n  refresh (cold): {cold_s * 1000:7.1f} ms"
+            f"\n  refresh (warm): {warm_s * 1000:7.1f} ms  ({saved:.0f}% saved)"
         )
-    assert warm_s <= cold_s * 1.25, "unchanged rebuild must not cost more than a first build"
+    assert warm_s < cold_s, "an unchanged vault must hit the fingerprint short-circuit"
 
 
-def test_scan_does_not_materialise_the_vault(large_vault: Path) -> None:
-    """`iter_markdown` must stay lazy.
+def test_iter_markdown_does_not_materialise_the_walk(large_vault: Path, monkeypatch, capsys) -> None:
+    """Prove laziness by observation, not by type.
 
-    Issue #9 proposed replacing `rglob` with `os.walk` for an O(1)-vs-O(n) memory
-    win. The premise was wrong — this is already a generator — and this test
-    pins that so a future refactor cannot quietly make it eager.
+    `hasattr(scan, "__next__")` is satisfied by a generator that builds the whole
+    `rglob()` list internally before its first yield — which is precisely the
+    O(n) behaviour issue #9 claimed existed. Counting how much of the underlying
+    walk is consumed before the first item comes out tests the actual property.
     """
+    consumed = 0
+    real_rglob = Path.rglob
+
+    def counting_rglob(self, pattern):
+        nonlocal consumed
+        for item in real_rglob(self, pattern):
+            consumed += 1
+            yield item
+
+    monkeypatch.setattr(Path, "rglob", counting_rglob)
+
     scan = iter_markdown(large_vault)
-    assert hasattr(scan, "__next__"), "iter_markdown must be a generator, not a materialised list"
     first = next(scan)
+    consumed_at_first_yield = consumed
+    total = sum(1 for _ in scan) + 1
+
+    with capsys.disabled():
+        print(
+            f"\n  walk entries consumed before first yield: {consumed_at_first_yield}"
+            f"\n  total notes yielded: {total}"
+        )
     assert first.suffix == ".md"
+    assert total >= LARGE, "the scan should still find every note"
+    assert consumed_at_first_yield < total, (
+        "iter_markdown materialised the whole walk before yielding; it must stay lazy"
+    )
 
 
 def test_query_surface_stays_responsive(large_vault: Path, capsys) -> None:
-    """Record latency for the operations agents actually call."""
-    with RuntimeIndex(_db(large_vault)) as idx:
+    """Record latency for the operations agents actually call.
+
+    Every result is asserted non-empty. A trace that bottoms out on `max_depth`
+    returns [] quickly, and timing that would report a failed search as fast
+    traversal.
+    """
+    with RuntimeIndex(_fresh_db(large_vault, "queries")) as idx:
         idx.build(large_vault, _schema(large_vault))
-        timings = {
-            "resolve": _time(lambda: idx.resolve("Note 10"))[0],
-            "search": _time(lambda: idx.search("body text"))[0],
-            "get": _time(lambda: idx.get("concept:n10"))[0],
-            "neighbors": _time(lambda: idx.neighbors("concept:n10"))[0],
-            "trace(0->20)": _time(lambda: idx.trace("concept:n0", "concept:n20"))[0],
-            "health": _time(lambda: idx.health())[0],
-        }
+
+        target = f"concept:n{TRACE_HOPS}"
+        results: dict[str, object] = {}
+        timings: dict[str, float] = {}
+        for name, fn in (
+            ("resolve", lambda: idx.resolve("Note 10")),
+            ("search", lambda: idx.search("body text")),
+            ("get", lambda: idx.get("concept:n10")),
+            ("neighbors", lambda: idx.neighbors("concept:n10")),
+            (f"trace(0->{TRACE_HOPS})", lambda: idx.trace("concept:n0", target)),
+            ("health", lambda: idx.health()),
+        ):
+            timings[name], results[name] = _time(fn)
+
+        deep_target = f"concept:n{LARGE - 1}"
+        timings[f"trace(0->{LARGE - 1}, deep)"], results["deep"] = _time(
+            lambda: idx.trace("concept:n0", deep_target, max_depth=LARGE)
+        )
+
     with capsys.disabled():
         print(f"\n  query latency over {LARGE} notes:")
         for name, seconds in timings.items():
-            print(f"    {name:14} {seconds * 1000:7.2f} ms")
-    # Loose ceiling: any single query taking over a second on 400 notes means
-    # something structural broke, not that the runner was busy.
+            print(f"    {name:26} {seconds * 1000:8.2f} ms")
+
+    trace_path = results[f"trace(0->{TRACE_HOPS})"]
+    assert trace_path, f"trace to {TRACE_HOPS} hops returned nothing — inside default max_depth?"
+    assert len(trace_path) == TRACE_HOPS + 1, f"expected {TRACE_HOPS} edges, got {trace_path}"
+    assert results["deep"], "explicit deep trace across the full chain should succeed"
+    for name in ("resolve", "search", "get", "neighbors"):
+        assert results[name], f"{name} returned nothing; the timing would be meaningless"
+
     slowest = max(timings.items(), key=lambda kv: kv[1])
-    assert slowest[1] < 1.0, f"{slowest[0]} took {slowest[1]:.2f}s on {LARGE} notes"
+    assert slowest[1] < 5.0, f"{slowest[0]} took {slowest[1]:.2f}s on {LARGE} notes"

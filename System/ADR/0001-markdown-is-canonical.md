@@ -1,6 +1,7 @@
 # 0001 — Markdown/YAML is canonical; projections are disposable
 
 **Status:** Accepted
+**Related:** [[0002-sqlite-for-the-projection]] · [[0003-content-based-fingerprint]] · [[0006-writes-off-by-default-everywhere]] · [[AGENTS.md]]
 
 ## Context
 

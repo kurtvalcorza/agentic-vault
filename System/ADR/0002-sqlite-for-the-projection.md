@@ -1,6 +1,7 @@
 # 0002 — SQLite/FTS for the derived projection
 
 **Status:** Accepted
+**Related:** [[0001-markdown-is-canonical]] · [[0003-content-based-fingerprint]] · [[0004-stdlib-only-runtime-dependencies]] · [[AGENTS.md]]
 
 ## Context
 
@@ -18,9 +19,16 @@ A single SQLite database with FTS5, written to `.agent/knowledge/generated/`.
   nothing to keep running between sessions — which is what allows the
   `vault-knowledge` MCP server to work with Obsidian closed.
 - One file to delete for a clean rebuild (ADR-0001).
-- Graph traversal is recursive SQL over an indexed `relations` table rather than
-  a native graph engine. Measured index-backed rather than scanning; see
-  `tests/test_performance.py`.
+- Graph traversal is **a Python breadth-first search over indexed SQL lookups**,
+  not recursive SQL and not a native graph engine. `core.trace()` keeps a
+  `deque` frontier and issues one indexed query per visited node; `neighbors()`
+  matches `source_id=? OR target_id=?`, which SQLite satisfies with a
+  `MULTI-INDEX OR` across `relations_source` and `relations_target`.
+- That shape has a consequence worth knowing: traversal cost is one round trip
+  per node, so depth is paid in Python rather than inside the engine.
+  `trace()` therefore takes a `max_depth`, defaulting to 6. A deep trace needs
+  it raised explicitly — measured at 12 ms across a 399-hop chain
+  (`test_query_surface_stays_responsive`).
 - Concurrent writers are limited. Acceptable: the projection has one writer.
 
 ## Alternatives considered

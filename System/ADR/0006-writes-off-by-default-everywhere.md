@@ -1,6 +1,7 @@
 # 0006 — Canonical writes off by default, on every entry point
 
 **Status:** Accepted
+**Related:** [[0001-markdown-is-canonical]] · [[0005-builds-fail-closed]] · [[AGENTS.md]]
 
 ## Context
 
