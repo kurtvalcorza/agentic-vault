@@ -1,0 +1,54 @@
+{
+  "_comment": [
+    "Example MCP wiring for the optional knowledge runtime.",
+    "",
+    "SCOPE: this file's format and location are Claude Code's project-scoped",
+    "server config. Copy it to .mcp.json (already gitignored) at the vault root.",
+    "Other harnesses read a different file in a different schema — Codex uses TOML",
+    "in ~/.codex/config.toml, Kiro uses .kiro/settings/mcp.json, Gemini CLI uses",
+    "settings.json. See the per-harness table in .agent/knowledge/README.md.",
+    "",
+    "REPLACE BOTH PATHS BELOW IN FULL, including the interpreter filename — the",
+    "layout differs by platform, so it is not enough to swap the vault directory:",
+    "  Windows : <vault>\\.venv\\Scripts\\python.exe",
+    "  macOS   : <vault>/.venv/bin/python",
+    "  Linux   : <vault>/.venv/bin/python",
+    "'command' must be the interpreter that has agentic_vault_knowledge installed;",
+    "a bare 'python' only works if the runtime is on the default interpreter.",
+    "",
+    "USE ABSOLUTE PATHS. A client may start a stdio server from any working",
+    "directory, so a relative 'command' or 'args' entry resolves against a",
+    "directory you do not control and the server never starts. .mcp.json is",
+    "gitignored precisely so it can hold machine-specific absolute paths.",
+    "",
+    "The launcher then resolves the vault root from its own __file__ location, so",
+    "you do not need to set AGENTIC_VAULT_ROOT and the server reads the right",
+    "vault regardless of where it was started. Locating the vault is the",
+    "launcher's job; locating the launcher is this file's job.",
+    "",
+    "Writes are OFF by default. To allow knowledge_apply_patch/apply_batch to",
+    "mutate canonical Markdown, add:",
+    "  \"env\": { \"AGENTIC_VAULT_KNOWLEDGE_READ_ONLY\": \"0\" }",
+    "",
+    "Claude Code users may substitute ${CLAUDE_PROJECT_DIR:-.} for the vault path,",
+    "but only if the server is always started with the vault as the project root:",
+    "CLAUDE_PROJECT_DIR is set in the SERVER's environment, not the client's, so it",
+    "is empty at config-expansion time and the :-. default leaves a cwd-relative",
+    "path. Absolute paths avoid that failure mode entirely.",
+    "",
+    "--- Windows example (replace the drive/path, keep Scripts\\python.exe) ---",
+    "  \"command\": \"C:\\\\Users\\\\you\\\\vault\\\\.venv\\\\Scripts\\\\python.exe\",",
+    "  \"args\": [\"C:\\\\Users\\\\you\\\\vault\\\\.agent\\\\scripts\\\\vault-knowledge-mcp.py\"]",
+    "",
+    "--- macOS/Linux example (shown live below) ---"
+  ],
+  "mcpServers": {
+    "vault-knowledge": {
+      "type": "stdio",
+      "command": "/ABSOLUTE/PATH/TO/VAULT/.venv/bin/python",
+      "args": [
+        "/ABSOLUTE/PATH/TO/VAULT/.agent/scripts/vault-knowledge-mcp.py"
+      ]
+    }
+  }
+}

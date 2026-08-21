@@ -172,6 +172,76 @@ vault-knowledge-mcp
 
 Set `AGENTIC_VAULT_ROOT` when the process is launched outside the vault root. The server exposes semantic operations for validation, resolution, search/retrieval, graph traversal, claims/evidence, temporal state, health/analytics, and proposal/validation/apply workflows. MCP contains no unique business logic; the CLI/tests use the same runtime library.
 
+### Wiring it into a client
+
+Every client runs the same command — the vault's interpreter, then the launcher —
+but **where that command is declared, and in what schema, is harness-specific**:
+
+| Harness | Config file | Schema |
+|:---|:---|:---|
+| Claude Code | `.mcp.json` at the vault root (project-scoped) | JSON, `mcpServers.<name>` |
+| Kiro | `.kiro/settings/mcp.json` | JSON, `mcpServers.<name>` |
+| Gemini CLI | `settings.json` | JSON, `mcpServers.<name>` |
+| Codex | `~/.codex/config.toml` | **TOML**, `[mcp_servers.<name>]` |
+
+`.mcp.json.example` is the **Claude Code** form. Copy it to `.mcp.json` (already
+gitignored) and replace both paths. Codex does not read that file at all; it
+needs the same command expressed as TOML:
+
+```toml
+[mcp_servers.vault-knowledge]
+command = 'C:\path\to\vault\.venv\Scripts\python.exe'
+args = ['C:\path\to\vault\.agent\scripts\vault-knowledge-mcp.py']
+```
+
+**Replace the interpreter path in full, not just the vault directory** — the venv
+layout differs by platform:
+
+```
+Windows      <vault>\.venv\Scripts\python.exe
+macOS/Linux  <vault>/.venv/bin/python
+```
+
+Beyond that, there are two separate problems here, and they need different
+solutions.
+
+**Locating the launcher is the config's job — use absolute paths.** A client may
+start a stdio server from any working directory, so a relative `command` or
+`args` entry resolves against a directory you do not control:
+
+```
+"${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python"
+  -> "./.venv/bin/python"          # CLAUDE_PROJECT_DIR is empty at expansion time
+  -> "<unrelated cwd>/.venv/bin/python"
+  -> FileNotFoundError; the server never starts
+```
+
+Claude Code sets `CLAUDE_PROJECT_DIR` in the **server's** environment, not its
+own, so it is empty when the config is expanded and the `:-.` default leaves a
+cwd-relative path. Expansion inside `env` is not documented for project scope
+either. `.mcp.json` is gitignored precisely so it can carry machine-specific
+absolute paths — use them. Substitute a project-root variable only if your client
+guarantees the working directory, and treat that as client-specific wiring.
+
+**Locating the vault is the launcher's job — that part is solved.**
+Once started, `.agent/scripts/vault-knowledge-mcp.py` resolves the vault root
+from its own `__file__`, so you never set `AGENTIC_VAULT_ROOT` and the server
+reads the right vault no matter which directory it was launched from. Verified by
+spawning the launcher by absolute path from an unrelated working directory with
+no environment preset: 22 tools listed, correct vault resolved.
+
+**Writes stay off unless you turn them on.** The launcher defaults
+`AGENTIC_VAULT_KNOWLEDGE_READ_ONLY` to `1`, so `knowledge_apply_patch` and
+`knowledge_apply_batch` raise `PermissionError`. They mutate canonical Markdown —
+treat enabling them as an outward state change, not a config tweak:
+
+```json
+"env": { "AGENTIC_VAULT_KNOWLEDGE_READ_ONLY": "0" }
+```
+
+**stdout is the JSON-RPC channel.** Anything a wrapper prints there corrupts the
+protocol. If you write your own launcher, send diagnostics to stderr.
+
 ## Extensions
 
 The public core stays domain-neutral. Downstream/private vaults may add classes and predicates under `schema/extensions/*.yaml`; extensions load deterministically and may not shadow core definitions. Provider/model-specific code belongs in adapters, not in the canonical schema.
