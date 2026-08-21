@@ -986,7 +986,7 @@ relations:
     review_status: pending
     created_by: agent:test
     reviewed_by:
-      - user:reviewer
+      - user:kurt
 ---
 # Alpha
 """,
@@ -1001,7 +1001,7 @@ relations:
         assert row["review_status"] == "pending"
         assert row["created_by"] == "agent:test"
         assert row["claim_confidence"] == 0.9
-        assert json.loads(row["reviewed_by_json"]) == ["user:reviewer"]
+        assert json.loads(row["reviewed_by_json"]) == ["user:kurt"]
 
 
 # --- Sixth review pass (head b848a92) regression coverage ---
