@@ -40,5 +40,18 @@ Changes are generic, synthetic, and agent-agnostic. Markdown/YAML remains author
 - CI workflow triggers now include canonical knowledge dirs (`Inbox/`, `01_Projects/`–`04_Archives/`) so note-only PRs still run whole-vault validation.
 - Added regression tests for each of the above.
 
+## Fourth pass (head 1b14981 review)
+- Populated canonical validity columns (`valid_from`/`valid_to`/`recorded_at`) on claim-derived graph edges (they previously carried only the legacy columns).
+- Graph exports (`export-jsonld`/`export-rdf`) refuse to overwrite a Markdown path, preventing accidental note clobbering; RDF export now excludes inferred edges by default.
+- OKF export uniquifies reserved-name collisions (`index.md` → `index-concept.md` vs an existing `index-concept.md`) instead of silently overwriting.
+- `trace()` now enforces the requested `max_depth` exactly (no off-by-one extra edge).
+- `iter_markdown` no longer excludes canonical folders by the generic names `generated`/`export`; only the runtime's own `.agent/knowledge/generated` tree and `.knowledge-ignore`-marked trees are skipped.
+- Rejected `knowledge_schema` versions newer than `schema/VERSION` (`unsupported-schema-version`).
+- Accepted the schema-declared `merged` relation status.
+- Rejected self-links/cycles in the merged-object redirect graph (`redirect-cycle`).
+- Validated `source_authority` on `Source` objects against the enum.
+- MCP write tools now hold the shared index lock across apply, so no query observes a partial batch.
+- Added regression tests for each.
+
 ## Status
 Review fixes implemented on `feat/knowledge-runtime-rfc-2`; PR #3 remains the review surface. Full local pytest (excluding the LinkML-dependency test, which CI runs) is green; `validate` / `build --full` / `health` on the public vault report zero issues.

@@ -17,7 +17,7 @@ from agentic_vault_knowledge.core import (
     split_frontmatter,
     validate_patch,
 )
-from agentic_vault_knowledge.interop import export_okf_bundle
+from agentic_vault_knowledge.interop import export_jsonld, export_okf_bundle, export_rdf_ntriples
 from agentic_vault_knowledge.proposals import propose_entity
 from agentic_vault_knowledge.runtime_index import EXPECTED_CLAIM_COLUMNS, RuntimeIndex
 from agentic_vault_knowledge.transactions import validate_batch
@@ -717,3 +717,189 @@ def test_batch_rechecks_create_target_absence_after_validation(vault: Path, monk
         transactions.apply_batch([proposal], vault)
     # The concurrently-created file was not overwritten by the stale create.
     assert "entity:other" in new_path.read_text(encoding="utf-8")
+
+
+# --- Fourth review pass (head 1b14981) regression coverage ---
+
+
+def test_merged_relation_status_is_valid(vault: Path) -> None:
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    alpha.write_text(
+        """---
+id: entity:alpha
+type: Entity
+title: Alpha
+relations:
+  - predicate: related_to
+    target: entity:beta
+    status: merged
+---
+# Alpha
+""",
+        encoding="utf-8",
+    )
+    issues = validate_vault_semantics(vault, _schema(vault))
+    assert "invalid-status" not in {item.code for item in issues}
+
+
+def test_trace_respects_max_depth(vault: Path) -> None:
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    alpha.write_text(
+        """---
+id: entity:alpha
+type: Entity
+title: Alpha
+relations:
+  - predicate: related_to
+    target: entity:beta
+---
+# Alpha
+""",
+        encoding="utf-8",
+    )
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        assert idx.trace("entity:alpha", "entity:beta", max_depth=0) == []
+        assert idx.trace("entity:alpha", "entity:beta", max_depth=1) == ["entity:alpha", "entity:beta"]
+
+
+def test_generic_generated_folder_is_indexed(vault: Path) -> None:
+    note = vault / "01_Projects/report/generated/Note.md"
+    note.parent.mkdir(parents=True)
+    note.write_text(
+        """---
+id: entity:gen
+type: Entity
+title: Generated Report Note
+---
+# Note
+""",
+        encoding="utf-8",
+    )
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        assert idx.get("entity:gen") is not None
+
+
+def test_claim_derived_edge_preserves_validity(vault: Path) -> None:
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    alpha.write_text(
+        """---
+id: entity:alpha
+type: Entity
+title: Alpha
+claims:
+  - id: claim:edge
+    predicate: related_to
+    object: entity:beta
+    status: accepted
+    valid_from: 2026-01-01
+    valid_to: 2026-06-01
+    recorded_at: 2026-01-02T03:00:00+00:00
+---
+# Alpha
+""",
+        encoding="utf-8",
+    )
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        row = idx.conn.execute(
+            "SELECT valid_from,valid_to,recorded_at FROM relations WHERE path LIKE '__claim__:%'"
+        ).fetchone()
+        assert row is not None
+        assert row["valid_from"] == "2026-01-01"
+        assert row["valid_to"] == "2026-06-01"
+        assert str(row["recorded_at"]).startswith("2026-01-02")
+
+
+def test_graph_export_refuses_markdown_output(vault: Path) -> None:
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    original = alpha.read_text(encoding="utf-8")
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        with pytest.raises(ValueError, match="Markdown"):
+            export_jsonld(idx, alpha)
+        with pytest.raises(ValueError, match="Markdown"):
+            export_rdf_ntriples(idx, alpha)
+    assert alpha.read_text(encoding="utf-8") == original
+
+
+def test_okf_export_uniquifies_reserved_name_collision(vault: Path, tmp_path: Path) -> None:
+    synthetic = vault / "02_Areas/Synthetic"
+    (synthetic / "index.md").write_text(
+        "---\nid: concept:idx\ntype: Concept\ntitle: Idx\n---\n# Idx\n", encoding="utf-8"
+    )
+    (synthetic / "index-concept.md").write_text(
+        "---\nid: concept:idxc\ntype: Concept\ntitle: IdxC\n---\n# IdxC\n", encoding="utf-8"
+    )
+    out = tmp_path / "bundle"
+    export_okf_bundle(vault, out)
+    names = {p.name for p in out.rglob("*.md")}
+    # The reserved-name rename collides; both objects survive under distinct names.
+    assert "index-concept.md" in names
+    assert "index-concept-1.md" in names
+
+
+def test_unsupported_schema_version_is_rejected(vault: Path) -> None:
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    alpha.write_text(
+        """---
+id: entity:alpha
+type: Entity
+title: Alpha
+knowledge_schema: "99.0"
+---
+# Alpha
+""",
+        encoding="utf-8",
+    )
+    issues = validate_vault_semantics(vault, _schema(vault))
+    assert "unsupported-schema-version" in {item.code for item in issues}
+
+
+def test_merged_redirect_cycle_is_rejected(vault: Path) -> None:
+    (vault / "02_Areas/Synthetic/A1.md").write_text(
+        "---\nid: entity:a1\ntype: Entity\ntitle: A1\nstatus: merged\nredirect_to: entity:a2\n---\n# A1\n",
+        encoding="utf-8",
+    )
+    (vault / "02_Areas/Synthetic/A2.md").write_text(
+        "---\nid: entity:a2\ntype: Entity\ntitle: A2\nstatus: merged\nredirect_to: entity:a1\n---\n# A2\n",
+        encoding="utf-8",
+    )
+    issues = validate_vault_semantics(vault, _schema(vault))
+    assert "redirect-cycle" in {item.code for item in issues}
+
+
+def test_source_object_authority_is_validated(vault: Path) -> None:
+    (vault / "02_Areas/Synthetic/Src.md").write_text(
+        "---\nid: source:x\ntype: Source\ntitle: Src\nsource_authority: primry\n---\n# Src\n",
+        encoding="utf-8",
+    )
+    issues = validate_vault_semantics(vault, _schema(vault))
+    assert "invalid-source-authority" in {item.code for item in issues}
+
+
+def test_rdf_export_excludes_inferred_relations(vault: Path, tmp_path: Path) -> None:
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    alpha.write_text(
+        """---
+id: entity:alpha
+type: Entity
+title: Alpha
+relations:
+  - predicate: related_to
+    target: entity:beta
+    derivation: inferred
+    status: accepted
+---
+# Alpha
+""",
+        encoding="utf-8",
+    )
+    out = tmp_path / "graph.nt"
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        export_rdf_ntriples(idx, out)
+    content = out.read_text(encoding="utf-8")
+    # The inferred edge must not appear as a plain asserted triple.
+    assert "relation:related_to" not in content

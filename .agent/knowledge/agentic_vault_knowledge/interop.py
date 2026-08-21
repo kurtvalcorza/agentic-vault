@@ -80,6 +80,7 @@ def export_okf_bundle(vault_root: Path, output_dir: Path) -> dict[str, Any]:
         )
         (staging / BUNDLE_MARKER).write_text(BUNDLE_SENTINEL, encoding="utf-8")
         exported: list[str] = []
+        mapped: set[str] = set()
         for path in source_paths:
             note = parse_note(path, root)
             if not note.semantic:
@@ -87,6 +88,14 @@ def export_okf_bundle(vault_root: Path, output_dir: Path) -> dict[str, Any]:
             rel = _safe_rel(note.path)
             if rel.name.lower() in RESERVED:
                 rel = rel.with_name(rel.stem + "-concept.md")
+            # Two distinct source objects can map to the same bundle path (e.g.
+            # index.md -> index-concept.md colliding with an existing
+            # index-concept.md). Uniquify so no export silently overwrites another.
+            counter = 1
+            while str(rel).replace("\\", "/") in mapped:
+                rel = rel.with_name(f"{rel.stem}-{counter}{rel.suffix}")
+                counter += 1
+            mapped.add(str(rel).replace("\\", "/"))
             target = staging / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             fm = dict(note.frontmatter)
@@ -156,7 +165,14 @@ def import_okf_candidates(bundle_root: Path) -> list[dict[str, Any]]:
     return out
 
 
+def _reject_markdown_output(output: Path) -> None:
+    """Graph exports must never overwrite a canonical Markdown note."""
+    if output.suffix.lower() == ".md":
+        raise ValueError(f"refusing to write a graph export over a Markdown path: {output}")
+
+
 def export_jsonld(index, output: Path) -> dict[str, Any]:
+    _reject_markdown_output(output)
     graph = []
     for row in index.conn.execute("SELECT id,type,title,status FROM objects ORDER BY id"):
         node = {"@id": row["id"], "@type": row["type"], "name": row["title"], "status": row["status"]}
@@ -188,6 +204,7 @@ def _literal(value: str) -> str:
 
 
 def export_rdf_ntriples(index, output: Path) -> dict[str, Any]:
+    _reject_markdown_output(output)
     rdf_type = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>"
     rdfs_label = "<http://www.w3.org/2000/01/rdf-schema#label>"
     av_status = _urn("property", "status")
@@ -200,7 +217,7 @@ def export_rdf_ntriples(index, output: Path) -> dict[str, Any]:
         lines.append(f"{subject} {av_status} {_literal(row['status'] or '')} .")
     for rel in index.conn.execute(
         "SELECT source_id,predicate,target_id,status,derivation FROM relations "
-        "WHERE status='accepted' ORDER BY source_id,predicate,target_id"
+        "WHERE status='accepted' AND derivation!='inferred' ORDER BY source_id,predicate,target_id"
     ):
         subject = _urn("object", rel["source_id"])
         predicate = _urn("relation", rel["predicate"])

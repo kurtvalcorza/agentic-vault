@@ -180,7 +180,10 @@ def knowledge_apply_patch(proposal_json: str) -> dict[str, Any]:
     if READ_ONLY:
         raise PermissionError("knowledge runtime is read-only; set AGENTIC_VAULT_KNOWLEDGE_READ_ONLY=0 to enable writes")
     proposal = json.loads(proposal_json)
-    apply_patch(proposal, VAULT_ROOT)
+    # Hold the shared index lock across the write so a concurrent query cannot
+    # refresh and serve a partially-applied state.
+    with _INDEX_LOCK:
+        apply_patch(proposal, VAULT_ROOT)
     path = Path(proposal["path"]).resolve()
     return {"applied": True, "path": str(path.relative_to(VAULT_ROOT))}
 
@@ -189,7 +192,8 @@ def knowledge_apply_patch(proposal_json: str) -> dict[str, Any]:
 def knowledge_apply_batch(proposals_json: str) -> dict[str, Any]:
     if READ_ONLY:
         raise PermissionError("knowledge runtime is read-only; set AGENTIC_VAULT_KNOWLEDGE_READ_ONLY=0 to enable writes")
-    applied = apply_batch(json.loads(proposals_json), VAULT_ROOT)
+    with _INDEX_LOCK:
+        applied = apply_batch(json.loads(proposals_json), VAULT_ROOT)
     return {"applied": applied, "count": len(applied)}
 
 

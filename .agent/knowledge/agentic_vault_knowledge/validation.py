@@ -30,6 +30,10 @@ SOURCE_AUTHORITIES = {"primary", "secondary", "tertiary", "unknown"}
 SCHEMA_VERSION_RE = re.compile(r"^\d+\.\d+(?:\.\d+)?$")
 
 
+def _version_tuple(value: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in value.split("."))
+
+
 def load_class_specs(schema_root: Path) -> dict[str, dict[str, Any]]:
     core = yaml.safe_load((schema_root / "core.yaml").read_text(encoding="utf-8")) or {}
     classes = {str(name): dict(spec or {}) for name, spec in (core.get("classes") or {}).items()}
@@ -192,6 +196,8 @@ def scan_vault_semantics(
     registry = load_relation_registry_with_extensions(schema_root)
     class_specs = load_class_specs(schema_root)
     extension_classes = {name for name in class_specs if name not in SEMANTIC_TYPES}
+    version_file = schema_root / "VERSION"
+    supported_version = version_file.read_text(encoding="utf-8").strip() if version_file.exists() else None
     issues, notes = _scan_notes(vault_root, replacements)
     ids: dict[str, ParsedNote] = {}
     aliases: dict[str, set[str]] = {}
@@ -212,6 +218,15 @@ def scan_vault_semantics(
         ks = note.frontmatter.get("knowledge_schema")
         if ks is not None and not SCHEMA_VERSION_RE.match(str(ks)):
             issues.append(ValidationIssue(p, "invalid-schema-version", "knowledge_schema must be a dotted numeric version"))
+        elif ks is not None and supported_version and _version_tuple(str(ks)) > _version_tuple(supported_version):
+            issues.append(ValidationIssue(
+                p, "unsupported-schema-version",
+                f"knowledge_schema {ks} is newer than supported {supported_version}; a migration is required",
+            ))
+        if note.object_type == "Source":
+            sa = note.frontmatter.get("source_authority")
+            if sa is not None and str(sa) not in SOURCE_AUTHORITIES:
+                issues.append(ValidationIssue(p, "invalid-source-authority", f"source_authority {sa!r} is not a valid value"))
         for field in ("created", "updated"):
             if field in note.frontmatter and not _date(note.frontmatter.get(field)):
                 issues.append(ValidationIssue(p, "invalid-object-time", f"{field} must be ISO YYYY-MM-DD"))
@@ -279,6 +294,26 @@ def scan_vault_semantics(
                 issues.append(ValidationIssue(p, "relation-domain", f"{prefix}: {pred} does not allow source type {src_type}"))
             if tgt_type and range_ and not _type_allowed(tgt_type, range_, class_specs):
                 issues.append(ValidationIssue(p, "relation-range", f"{prefix}: {pred} does not allow target type {tgt_type}"))
+
+    # Detect self-links and cycles in the merged-object redirect graph: these
+    # build cleanly (all targets exist) but leave every id/alias in the cycle
+    # unresolvable at query time.
+    redirect_edges: dict[str, str] = {}
+    for note in notes:
+        if note.semantic and note.object_id and str(note.frontmatter.get("status") or "") == "merged":
+            target = note.frontmatter.get("redirect_to")
+            if target:
+                redirect_edges[note.object_id] = str(target)
+    for start in redirect_edges:
+        seen: set[str] = set()
+        current = start
+        while current in redirect_edges:
+            if current in seen:
+                p = str(ids[start].path) if start in ids else "<vault>"
+                issues.append(ValidationIssue(p, "redirect-cycle", f"merged redirect cycle starting at {start}"))
+                break
+            seen.add(current)
+            current = redirect_edges[current]
 
     for alias, object_ids in sorted(aliases.items()):
         if len(object_ids) > 1:

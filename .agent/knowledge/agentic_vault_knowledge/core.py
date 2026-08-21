@@ -27,7 +27,7 @@ SEMANTIC_TYPES = {
     "Source", "Claim", "Event", "Decision", "Artifact",
 }
 DERIVATIONS = {"asserted", "extracted", "inferred", "ambiguous", "imported"}
-STATUSES = {"candidate", "proposed", "accepted", "active", "superseded", "retracted", "retired", "archived"}
+STATUSES = {"candidate", "proposed", "accepted", "active", "superseded", "retracted", "retired", "archived", "merged"}
 
 
 class KnowledgeError(Exception):
@@ -229,7 +229,12 @@ def _has_knowledge_ignore(path: Path, vault_root: Path) -> bool:
 
 
 def iter_markdown(vault_root: Path) -> Iterator[Path]:
-    excluded = {".git", ".venv", "node_modules", "generated", "export", "__pycache__"}
+    # Only exclude names that are never canonical vault content. Generic names
+    # like "generated"/"export" are NOT excluded globally — a real PARA folder
+    # may legitimately use them; the runtime's own generated tree is excluded by
+    # exact path, and OKF bundles carry a `.knowledge-ignore` marker instead.
+    excluded = {".git", ".venv", "node_modules", "__pycache__"}
+    runtime_generated = Path(".agent") / "knowledge" / "generated"
     root = vault_root.resolve()
     for path in root.rglob("*.md"):
         try:
@@ -237,6 +242,8 @@ def iter_markdown(vault_root: Path) -> Iterator[Path]:
         except ValueError:
             continue
         if any(part in excluded for part in rel.parts):
+            continue
+        if runtime_generated == rel or runtime_generated in rel.parents:
             continue
         if _has_knowledge_ignore(path, root):
             continue
@@ -492,7 +499,10 @@ class KnowledgeIndex:
         seen = {start}
         while q:
             node, path = q.popleft()
-            if len(path) > max_depth + 1:
+            # path holds nodes; edges == len(path) - 1. Stop expanding once the
+            # next edge would exceed max_depth so returned paths never carry more
+            # than the requested number of edges.
+            if len(path) > max_depth:
                 continue
             rows = self.conn.execute(
                 "SELECT source_id,target_id FROM relations WHERE status='accepted'" + derived_clause + " AND (source_id=? OR target_id=?)",

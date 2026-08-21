@@ -169,9 +169,10 @@ class ExtendedKnowledgeIndex(KnowledgeIndex):
 
                 if status == "accepted" and subject in object_ids and str(obj) in object_ids:
                     cur = self.conn.execute(
-                        "INSERT INTO relations(source_id,predicate,target_id,derivation,status,event_time,transaction_time,confidence,path) VALUES(?,?,?,?,?,?,?,?,?)",
+                        "INSERT INTO relations(source_id,predicate,target_id,derivation,status,event_time,transaction_time,valid_from,valid_to,recorded_at,confidence,path) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                         (
                             subject, str(predicate), str(obj), derivation, status, valid_from, recorded_at,
+                            valid_from, valid_to, recorded_at,
                             claim.get("claim_confidence", claim.get("confidence")),
                             f"__claim__:{row['path']}:{claim_id}",
                         ),
