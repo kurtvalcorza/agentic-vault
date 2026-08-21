@@ -14,6 +14,15 @@ from .core import iter_markdown, parse_note, split_frontmatter
 
 RESERVED = {"index.md", "log.md"}
 IGNORE_MARKER = ".knowledge-ignore"
+# Exporter-owned ownership manifest. Only a directory carrying this exact
+# manifest may be replaced by a later export, so a generic scan-ignore marker
+# (which many vault directories legitimately carry) is never treated as
+# permission to destroy the directory.
+BUNDLE_MARKER = ".okf-bundle"
+BUNDLE_SENTINEL = "agentic-vault-okf-bundle\n"
+# First-level agent/config workspaces that must never be an export destination,
+# even if they happen to carry the ownership manifest.
+PROTECTED_DIRNAMES = {".git", ".agent", ".claude", ".gemini", ".kiro", ".codex", ".obsidian"}
 
 
 def _safe_rel(path: Path) -> Path:
@@ -27,6 +36,15 @@ def _is_within(path: Path, parent: Path) -> bool:
     return path == parent or parent in path.parents
 
 
+def _reject_protected_destination(root: Path, destination: Path) -> None:
+    if destination == root:
+        raise ValueError(f"refusing to export onto the vault root: {destination}")
+    if destination in root.parents:
+        raise ValueError(f"refusing to export onto an ancestor of the vault root: {destination}")
+    if destination.name in PROTECTED_DIRNAMES:
+        raise ValueError(f"refusing to export onto protected directory: {destination}")
+
+
 def export_okf_bundle(vault_root: Path, output_dir: Path) -> dict[str, Any]:
     """Export semantic notes as an OKF v0.2-compatible Markdown bundle.
 
@@ -37,6 +55,8 @@ def export_okf_bundle(vault_root: Path, output_dir: Path) -> dict[str, Any]:
     root = vault_root.resolve()
     destination = output_dir.resolve()
 
+    _reject_protected_destination(root, destination)
+
     # Snapshot canonical source paths before creating or replacing destination.
     source_paths = [
         path for path in iter_markdown(root)
@@ -44,10 +64,11 @@ def export_okf_bundle(vault_root: Path, output_dir: Path) -> dict[str, Any]:
     ]
 
     if destination.exists():
-        marker = destination / IGNORE_MARKER
-        if not marker.exists():
+        manifest = destination / BUNDLE_MARKER
+        if not (manifest.is_file() and manifest.read_text(encoding="utf-8").startswith(BUNDLE_SENTINEL)):
             raise ValueError(
-                f"refusing to replace existing export directory without {IGNORE_MARKER}: {destination}"
+                f"refusing to replace {destination}: not an agentic-vault OKF bundle "
+                f"(missing {BUNDLE_MARKER} ownership manifest)"
             )
 
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -57,6 +78,7 @@ def export_okf_bundle(vault_root: Path, output_dir: Path) -> dict[str, Any]:
             "Generated knowledge projection. Excluded from canonical vault indexing.\n",
             encoding="utf-8",
         )
+        (staging / BUNDLE_MARKER).write_text(BUNDLE_SENTINEL, encoding="utf-8")
         exported: list[str] = []
         for path in source_paths:
             note = parse_note(path, root)

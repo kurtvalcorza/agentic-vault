@@ -26,7 +26,7 @@ SEMANTIC_TYPES = {
     "KnowledgeObject", "Entity", "Concept", "Project", "Person", "Organization",
     "Source", "Claim", "Event", "Decision", "Artifact",
 }
-DERIVATIONS = {"asserted", "extracted", "inferred", "ambiguous"}
+DERIVATIONS = {"asserted", "extracted", "inferred", "ambiguous", "imported"}
 STATUSES = {"candidate", "proposed", "accepted", "active", "superseded", "retracted", "retired", "archived"}
 
 
@@ -55,6 +55,9 @@ class Relation:
     evidence: tuple[Evidence, ...] = ()
     event_time: str | None = None
     transaction_time: str | None = None
+    valid_from: str | None = None
+    valid_to: str | None = None
+    recorded_at: str | None = None
     confidence: float | None = None
 
 
@@ -101,10 +104,15 @@ def split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     if not normalized.startswith("---\n"):
         return {}, normalized
     end = normalized.find("\n---\n", 4)
-    if end < 0:
+    if end >= 0:
+        raw = normalized[4:end]
+        body = normalized[end + 5 :]
+    elif normalized.endswith("\n---"):
+        # Closing delimiter at end of file with no trailing body newline.
+        raw = normalized[4:-4]
+        body = ""
+    else:
         return {}, normalized
-    raw = normalized[4:end]
-    body = normalized[end + 5 :]
     data = yaml.safe_load(raw) or {}
     if not isinstance(data, dict):
         raise KnowledgeError("YAML frontmatter must be a mapping")
@@ -155,14 +163,22 @@ def _parse_relations(value: Any) -> tuple[Relation, ...]:
         confidence = raw.get("confidence")
         if confidence is not None:
             confidence = float(confidence)
+
+        def _opt(key: str) -> str | None:
+            value = raw.get(key)
+            return str(value) if value is not None else None
+
         out.append(Relation(
             predicate=str(raw["predicate"]),
             target=str(raw["target"]),
             derivation=str(raw.get("derivation") or "asserted"),
             status=str(raw.get("status") or "accepted"),
             evidence=_parse_evidence(raw.get("evidence")),
-            event_time=str(raw["event_time"]) if raw.get("event_time") is not None else None,
-            transaction_time=str(raw["transaction_time"]) if raw.get("transaction_time") is not None else None,
+            event_time=_opt("event_time"),
+            transaction_time=_opt("transaction_time"),
+            valid_from=_opt("valid_from"),
+            valid_to=_opt("valid_to"),
+            recorded_at=_opt("recorded_at"),
             confidence=confidence,
         ))
     return tuple(out)
@@ -281,7 +297,7 @@ CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY, content_hash TEXT NOT NU
 CREATE TABLE IF NOT EXISTS objects(id TEXT PRIMARY KEY, type TEXT NOT NULL, title TEXT NOT NULL, path TEXT NOT NULL UNIQUE, status TEXT, body TEXT NOT NULL, frontmatter_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS aliases(alias_norm TEXT NOT NULL, object_id TEXT NOT NULL, alias TEXT NOT NULL, PRIMARY KEY(alias_norm, object_id), FOREIGN KEY(object_id) REFERENCES objects(id) ON DELETE CASCADE);
 CREATE TABLE IF NOT EXISTS navigation(source_path TEXT NOT NULL, target_ref TEXT NOT NULL, PRIMARY KEY(source_path,target_ref));
-CREATE TABLE IF NOT EXISTS relations(id INTEGER PRIMARY KEY AUTOINCREMENT, source_id TEXT NOT NULL, predicate TEXT NOT NULL, target_id TEXT NOT NULL, derivation TEXT NOT NULL, status TEXT NOT NULL, event_time TEXT, transaction_time TEXT, confidence REAL, path TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS relations(id INTEGER PRIMARY KEY AUTOINCREMENT, source_id TEXT NOT NULL, predicate TEXT NOT NULL, target_id TEXT NOT NULL, derivation TEXT NOT NULL, status TEXT NOT NULL, event_time TEXT, transaction_time TEXT, valid_from TEXT, valid_to TEXT, recorded_at TEXT, confidence REAL, path TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS evidence(relation_id INTEGER NOT NULL, source TEXT NOT NULL, locator_type TEXT NOT NULL, locator_value TEXT, authority TEXT NOT NULL, FOREIGN KEY(relation_id) REFERENCES relations(id) ON DELETE CASCADE);
 CREATE TABLE IF NOT EXISTS timeline(object_id TEXT NOT NULL, ordinal INTEGER NOT NULL, event_time TEXT NOT NULL, transaction_time TEXT NOT NULL, claim TEXT NOT NULL, source TEXT NOT NULL, PRIMARY KEY(object_id,ordinal), FOREIGN KEY(object_id) REFERENCES objects(id) ON DELETE CASCADE);
 CREATE VIRTUAL TABLE IF NOT EXISTS objects_fts USING fts5(id UNINDEXED, title, body, aliases, tags, content='');
@@ -295,7 +311,11 @@ class KnowledgeIndex:
     def __init__(self, db_path: Path):
         self.db_path = db_path
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(db_path)
+        # check_same_thread=False: under the MCP runtime synchronous tools run in
+        # AnyIO worker threads, so the cached connection may be touched by a
+        # different thread than the one that opened it. All access is serialized
+        # by the caller's lock, so relaxing the same-thread guard is safe.
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA_SQL)
 
@@ -349,9 +369,9 @@ class KnowledgeIndex:
             )
             for rel in note.relations:
                 cur = self.conn.execute(
-                    "INSERT INTO relations(source_id,predicate,target_id,derivation,status,event_time,transaction_time,confidence,path) VALUES(?,?,?,?,?,?,?,?,?)",
+                    "INSERT INTO relations(source_id,predicate,target_id,derivation,status,event_time,transaction_time,valid_from,valid_to,recorded_at,confidence,path) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                     (note.object_id, rel.predicate, rel.target, rel.derivation, rel.status,
-                     rel.event_time, rel.transaction_time, rel.confidence, path),
+                     rel.event_time, rel.transaction_time, rel.valid_from, rel.valid_to, rel.recorded_at, rel.confidence, path),
                 )
                 rid = int(cur.lastrowid)
                 self.conn.executemany(
@@ -401,7 +421,7 @@ class KnowledgeIndex:
         self.close()
         with contextlib.suppress(FileNotFoundError):
             self.db_path.unlink()
-        self.conn = sqlite3.connect(self.db_path)
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA_SQL)
         return self.build(vault_root, schema_root)
@@ -459,9 +479,10 @@ class KnowledgeIndex:
             sql += " AND status='accepted' AND derivation!='inferred'"
         return [dict(r) for r in self.conn.execute(sql, args)]
 
-    def trace(self, start: str, end: str, max_depth: int = 6) -> list[str]:
+    def trace(self, start: str, end: str, max_depth: int = 6, include_derived: bool = False) -> list[str]:
         if start == end:
             return [start]
+        derived_clause = "" if include_derived else " AND derivation!='inferred'"
         q = deque([(start, [start])])
         seen = {start}
         while q:
@@ -469,7 +490,7 @@ class KnowledgeIndex:
             if len(path) > max_depth + 1:
                 continue
             rows = self.conn.execute(
-                "SELECT source_id,target_id FROM relations WHERE status='accepted' AND (source_id=? OR target_id=?)",
+                "SELECT source_id,target_id FROM relations WHERE status='accepted'" + derived_clause + " AND (source_id=? OR target_id=?)",
                 (node, node),
             )
             for r in rows:
@@ -499,6 +520,7 @@ class KnowledgeIndex:
             "a.event_time,a.id AS left_id,b.id AS right_id FROM relations a JOIN relations b "
             "ON a.source_id=b.source_id AND a.predicate=b.predicate AND a.id<b.id "
             "WHERE a.status='accepted' AND b.status='accepted' AND a.target_id<>b.target_id "
+            "AND a.path NOT LIKE '__claim__:%' AND b.path NOT LIKE '__claim__:%' "
             "AND COALESCE(a.event_time,'')=COALESCE(b.event_time,'')"
         )
         return [dict(r) for r in rows]
@@ -569,23 +591,85 @@ def propose_frontmatter_patch(path: Path, patch: dict[str, Any]) -> dict[str, An
     return {"path": str(path), "base_hash": before_hash, "frontmatter": candidate, "content": rendered}
 
 
+def _parse_candidate_note(content: str) -> ParsedNote:
+    with tempfile.TemporaryDirectory() as tmp:
+        candidate = Path(tmp) / "candidate.md"
+        candidate.write_text(content, encoding="utf-8")
+        return parse_note(candidate)
+
+
+IDENTITY_EXEMPT_OPERATIONS = {"create", "migrate", "merge"}
+
+
+def _identity_guard_issues(proposal: dict[str, Any], path: Path) -> list[ValidationIssue]:
+    """Reject silent semantic demotion or stable-ID changes on ordinary patches."""
+    operation = str(proposal.get("operation") or "update")
+    if operation in IDENTITY_EXEMPT_OPERATIONS or not path.exists():
+        return []
+    try:
+        current = parse_note(path)
+    except Exception:
+        return []
+    if not (current.semantic and current.object_id):
+        return []
+    try:
+        candidate = _parse_candidate_note(str(proposal["content"]))
+    except Exception:
+        return []
+    p = str(path)
+    if not (candidate.semantic and candidate.object_id):
+        return [ValidationIssue(
+            p, "semantic-demotion",
+            "patch would strip id/type from a semantic object; use an explicit migration",
+        )]
+    if candidate.object_id != current.object_id:
+        return [ValidationIssue(
+            p, "identity-change",
+            f"patch changes stable id {current.object_id} -> {candidate.object_id}; "
+            "require an explicit migration or merge operation",
+        )]
+    return []
+
+
 def validate_patch(proposal: dict[str, Any], vault_root: Path) -> list[ValidationIssue]:
     """Validate a candidate in the complete vault context and extension schema."""
     path = _resolve_vault_path(proposal["path"], vault_root)
     from .validation import validate_candidate_semantics
-    return validate_candidate_semantics(str(proposal["content"]), path, vault_root)
+    issues = list(validate_candidate_semantics(str(proposal["content"]), path, vault_root))
+    issues.extend(_identity_guard_issues(proposal, path))
+    return issues
+
+
+def _is_create(proposal: dict[str, Any]) -> bool:
+    return str(proposal.get("operation") or "update") == "create" or proposal.get("base_hash") is None
 
 
 def apply_patch(proposal: dict[str, Any], vault_root: Path) -> None:
     path = _resolve_vault_path(proposal["path"], vault_root)
-    if not path.exists():
-        raise KnowledgeError(f"source file does not exist: {path}")
-    current = path.read_text(encoding="utf-8")
-    if sha256_text(current) != proposal["base_hash"]:
-        raise ConflictError(f"source changed since proposal: {path}")
+    creating = _is_create(proposal)
+    if creating:
+        if path.exists():
+            raise ConflictError(f"create target already exists: {path}")
+    else:
+        if not path.exists():
+            raise KnowledgeError(f"source file does not exist: {path}")
+        current = path.read_text(encoding="utf-8")
+        if sha256_text(current) != proposal["base_hash"]:
+            raise ConflictError(f"source changed since proposal: {path}")
     issues = validate_patch(proposal, vault_root)
     if any(i.severity == "error" for i in issues):
         raise KnowledgeError("candidate patch failed validation: " + "; ".join(i.message for i in issues))
+    # Re-check the source state after validation (which scans the whole vault and
+    # can race a concurrent edit) to keep the optimistic-concurrency guarantee.
+    if creating:
+        if path.exists():
+            raise ConflictError(f"create target appeared during validation: {path}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        if not path.exists():
+            raise ConflictError(f"source removed during validation: {path}")
+        if sha256_text(path.read_text(encoding="utf-8")) != proposal["base_hash"]:
+            raise ConflictError(f"source changed during validation: {path}")
     fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:

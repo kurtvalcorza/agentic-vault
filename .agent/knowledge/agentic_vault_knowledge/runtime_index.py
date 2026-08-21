@@ -24,6 +24,7 @@ class RuntimeIndex(ExtendedKnowledgeIndex):
         KnowledgeIndex.__init__(self, db_path)
         self._last_fingerprint: tuple | None = None
         self._ensure_mutable_fts()
+        self._ensure_relations_schema()
         self._ensure_extended_schema()
         self.conn.executescript(EXTENDED_SQL)
 
@@ -34,6 +35,19 @@ class RuntimeIndex(ExtendedKnowledgeIndex):
             return
         self.conn.execute("DROP TABLE objects_fts")
         self.conn.execute(NORMAL_FTS_SQL)
+        self.conn.execute("DELETE FROM files")
+        self.conn.commit()
+
+    def _ensure_relations_schema(self) -> None:
+        columns = {r["name"] for r in self.conn.execute("PRAGMA table_info(relations)")}
+        if {"valid_from", "valid_to", "recorded_at"} <= columns:
+            return
+        # An older disposable DB predates the canonical relation validity columns.
+        # Relations are fully rebuildable from Markdown, so drop and recreate the
+        # table (and its dependent evidence rows) and force a reprojection.
+        self.conn.execute("DROP TABLE IF EXISTS evidence")
+        self.conn.execute("DROP TABLE IF EXISTS relations")
+        self.conn.executescript(SCHEMA_SQL)
         self.conn.execute("DELETE FROM files")
         self.conn.commit()
 
@@ -106,7 +120,7 @@ class RuntimeIndex(ExtendedKnowledgeIndex):
         self.close()
         with contextlib.suppress(FileNotFoundError):
             db_path.unlink()
-        self.conn = sqlite3.connect(db_path)
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         base = SCHEMA_SQL.replace(
             "CREATE VIRTUAL TABLE IF NOT EXISTS objects_fts USING fts5(id UNINDEXED, title, body, aliases, tags, content='');",

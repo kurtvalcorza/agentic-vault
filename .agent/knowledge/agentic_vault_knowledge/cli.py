@@ -54,6 +54,7 @@ def main() -> int:
     trace.add_argument("start")
     trace.add_argument("end")
     trace.add_argument("--max-depth", type=int, default=6)
+    trace.add_argument("--include-derived", action="store_true")
     query = sub.add_parser("query")
     query.add_argument("--type")
     query.add_argument("--predicate")
@@ -156,7 +157,7 @@ def main() -> int:
         elif args.cmd == "neighbors":
             out = idx.neighbors(args.id, args.predicate, args.include_derived)
         elif args.cmd == "trace":
-            out = idx.trace(args.start, args.end, args.max_depth)
+            out = idx.trace(args.start, args.end, args.max_depth, args.include_derived)
         elif args.cmd == "timeline":
             out = idx.timeline(args.id)
         elif args.cmd == "state-as-of":

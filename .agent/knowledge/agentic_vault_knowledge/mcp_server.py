@@ -96,8 +96,8 @@ def knowledge_neighbors(object_id: str, predicate: str | None = None, include_de
 
 
 @mcp.tool()
-def knowledge_trace_path(start_id: str, end_id: str, max_depth: int = 6) -> list[str]:
-    return _with_index(lambda idx: idx.trace(start_id, end_id, max_depth))
+def knowledge_trace_path(start_id: str, end_id: str, max_depth: int = 6, include_derived: bool = False) -> list[str]:
+    return _with_index(lambda idx: idx.trace(start_id, end_id, max_depth, include_derived))
 
 
 @mcp.tool()
@@ -141,8 +141,8 @@ def knowledge_communities() -> list[dict[str, Any]]:
 
 
 @mcp.tool()
-def knowledge_impact(object_id: str, max_depth: int = 3) -> list[dict[str, Any]]:
-    return _with_index(lambda idx: idx.impact(object_id, max_depth))
+def knowledge_impact(object_id: str, max_depth: int = 3, include_derived: bool = False) -> list[dict[str, Any]]:
+    return _with_index(lambda idx: idx.impact(object_id, max_depth, include_derived))
 
 
 @mcp.tool()

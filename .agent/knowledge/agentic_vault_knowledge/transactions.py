@@ -6,7 +6,16 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from .core import ConflictError, KnowledgeError, _resolve_vault_path, parse_note, sha256_text, validate_patch
+from .core import (
+    ConflictError,
+    KnowledgeError,
+    _identity_guard_issues,
+    _is_create,
+    _resolve_vault_path,
+    parse_note,
+    sha256_text,
+)
+from .validation import validate_batch_semantics
 
 
 def _candidate_identity(proposal: dict[str, Any]) -> tuple[str | None, set[str]]:
@@ -23,11 +32,20 @@ def _candidate_identity(proposal: dict[str, Any]) -> tuple[str | None, set[str]]
 
 
 def validate_batch(proposals: list[dict[str, Any]], vault_root: Path) -> list[dict[str, Any]]:
-    """Validate each replacement plus simultaneous identity collisions before writes."""
+    """Validate the combined final batch state plus per-file identity/concurrency.
+
+    Each candidate is checked for path safety, semantic demotion / stable-ID
+    change, existence, hash-bound concurrency, and cross-proposal identity
+    collisions. The whole replacement set is then validated *simultaneously* so
+    that a violation only visible when the proposals are combined (for example a
+    relation whose range is broken by a type change in a sibling proposal) is
+    caught before any file is written.
+    """
     seen_paths: set[Path] = set()
     candidate_ids: dict[str, str] = {}
     candidate_claims: dict[str, str] = {}
     out: list[dict[str, Any]] = []
+    replacements: list[tuple[Path, str]] = []
 
     for proposal in proposals:
         try:
@@ -40,12 +58,19 @@ def validate_batch(proposals: list[dict[str, Any]], vault_root: Path) -> list[di
             continue
         seen_paths.add(path)
 
-        out.extend(item.__dict__ for item in validate_patch(proposal, vault_root))
-        if not path.exists():
-            out.append({"path": str(path), "code": "missing-source", "message": "source file does not exist", "severity": "error"})
-            continue
-        if sha256_text(path.read_text(encoding="utf-8")) != proposal.get("base_hash"):
-            out.append({"path": str(path), "code": "conflict", "message": "source changed since proposal", "severity": "error"})
+        out.extend(item.__dict__ for item in _identity_guard_issues(proposal, path))
+
+        creating = _is_create(proposal)
+        if creating:
+            if path.exists():
+                out.append({"path": str(path), "code": "target-exists", "message": "create target already exists", "severity": "error"})
+                continue
+        else:
+            if not path.exists():
+                out.append({"path": str(path), "code": "missing-source", "message": "source file does not exist", "severity": "error"})
+                continue
+            if sha256_text(path.read_text(encoding="utf-8")) != proposal.get("base_hash"):
+                out.append({"path": str(path), "code": "conflict", "message": "source changed since proposal", "severity": "error"})
 
         try:
             object_id, claim_ids = _candidate_identity(proposal)
@@ -70,6 +95,9 @@ def validate_batch(proposals: list[dict[str, Any]], vault_root: Path) -> list[di
                 })
             else:
                 candidate_claims[claim_id] = str(path)
+        replacements.append((path, str(proposal["content"])))
+
+    out.extend(item.__dict__ for item in validate_batch_semantics(replacements, vault_root))
     return out
 
 
@@ -84,11 +112,16 @@ def apply_batch(proposals: list[dict[str, Any]], vault_root: Path) -> list[str]:
 
     staged: dict[Path, Path] = {}
     backups: dict[Path, bytes] = {}
+    created: set[Path] = set()
     replaced: list[Path] = []
     try:
         for proposal in proposals:
             path = _resolve_vault_path(proposal["path"], vault_root)
-            backups[path] = path.read_bytes()
+            if _is_create(proposal):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                created.add(path)
+            else:
+                backups[path] = path.read_bytes()
             fd, tmp = tempfile.mkstemp(prefix=path.name + ".knowledge-stage.", dir=str(path.parent))
             with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
                 handle.write(str(proposal["content"]))
@@ -102,6 +135,9 @@ def apply_batch(proposals: list[dict[str, Any]], vault_root: Path) -> list[str]:
     except Exception:
         for path in reversed(replaced):
             with contextlib.suppress(Exception):
+                if path in created:
+                    path.unlink()
+                    continue
                 fd, tmp = tempfile.mkstemp(prefix=path.name + ".knowledge-rollback.", dir=str(path.parent))
                 with os.fdopen(fd, "wb") as handle:
                     handle.write(backups[path])

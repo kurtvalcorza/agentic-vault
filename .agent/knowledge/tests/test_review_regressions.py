@@ -7,11 +7,29 @@ from pathlib import Path
 
 import pytest
 
-from agentic_vault_knowledge import cli
-from agentic_vault_knowledge.core import KnowledgeError, propose_frontmatter_patch, split_frontmatter
+from agentic_vault_knowledge import cli, core
+from agentic_vault_knowledge.core import (
+    ConflictError,
+    KnowledgeError,
+    apply_patch,
+    propose_frontmatter_patch,
+    sha256_text,
+    split_frontmatter,
+    validate_patch,
+)
 from agentic_vault_knowledge.interop import export_okf_bundle
+from agentic_vault_knowledge.proposals import propose_entity
 from agentic_vault_knowledge.runtime_index import EXPECTED_CLAIM_COLUMNS, RuntimeIndex
+from agentic_vault_knowledge.transactions import validate_batch
 from agentic_vault_knowledge.validation import validate_vault_semantics
+
+
+def _schema(vault: Path) -> Path:
+    return vault / ".agent/knowledge/schema"
+
+
+def _db(vault: Path) -> Path:
+    return vault / ".agent/knowledge/generated/knowledge.db"
 
 
 @pytest.fixture()
@@ -264,3 +282,284 @@ def test_cli_validation_commands_return_nonzero_on_errors(vault: Path, monkeypat
     proposal_file.write_text(json.dumps(proposal), encoding="utf-8")
     monkeypatch.setattr(sys, "argv", ["vault-knowledge", "--vault", str(vault), "validate-patch", str(proposal_file)])
     assert cli.main() == 1
+
+
+# --- Second review pass (current head) regression coverage ---
+
+
+def test_split_frontmatter_accepts_closing_delimiter_at_eof() -> None:
+    fm, body = split_frontmatter("---\nid: concept:eof\ntype: Concept\n---")
+    assert fm["id"] == "concept:eof"
+    assert fm["type"] == "Concept"
+    assert body == ""
+
+
+def test_apply_patch_rejects_semantic_demotion(vault: Path) -> None:
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    proposal = {
+        "path": str(alpha),
+        "base_hash": sha256_text(alpha.read_text(encoding="utf-8")),
+        "content": "# demoted\n",
+    }
+    codes = {item.code for item in validate_patch(proposal, vault) if item.severity == "error"}
+    assert "semantic-demotion" in codes
+    with pytest.raises(KnowledgeError):
+        apply_patch(proposal, vault)
+    assert "id: entity:alpha" in alpha.read_text(encoding="utf-8")
+
+
+def test_patch_rejects_stable_id_change(vault: Path) -> None:
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    proposal = propose_frontmatter_patch(alpha, {"id": "entity:renamed"})
+    codes = {item.code for item in validate_patch(proposal, vault) if item.severity == "error"}
+    assert "identity-change" in codes
+
+
+def test_apply_patch_rechecks_hash_after_validation(vault: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    proposal = propose_frontmatter_patch(alpha, {"title": "New Title"})
+
+    def racing_validate(prop: dict, root: Path) -> list:
+        alpha.write_text(alpha.read_text(encoding="utf-8") + "\nconcurrent edit\n", encoding="utf-8")
+        return []
+
+    monkeypatch.setattr(core, "validate_patch", racing_validate)
+    with pytest.raises(ConflictError):
+        core.apply_patch(proposal, vault)
+
+
+def test_create_proposal_can_be_applied(vault: Path) -> None:
+    proposal = propose_entity(vault, "02_Areas/Synthetic/New.md", {
+        "id": "entity:new", "type": "Entity", "title": "New Entity",
+    })
+    apply_patch(proposal, vault)
+    created = vault / "02_Areas/Synthetic/New.md"
+    assert created.exists()
+    assert "id: entity:new" in created.read_text(encoding="utf-8")
+    with pytest.raises(ConflictError):
+        apply_patch(proposal, vault)
+
+
+def test_batch_validates_combined_final_state(vault: Path) -> None:
+    person = vault / "02_Areas/Synthetic/Person.md"
+    person.write_text(
+        """---
+id: person:p
+type: Person
+title: P
+---
+# P
+""",
+        encoding="utf-8",
+    )
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    prop_relation = propose_frontmatter_patch(alpha, {
+        "relations": [{"predicate": "authored_by", "target": "person:p"}],
+    })
+    prop_retype = propose_frontmatter_patch(person, {"type": "Artifact"})
+    # Each proposal is individually valid against the current vault.
+    assert not [i for i in validate_patch(prop_relation, vault) if i.severity == "error"]
+    assert not [i for i in validate_patch(prop_retype, vault) if i.severity == "error"]
+    # Combined, authored_by's range ([Person, Organization]) is violated.
+    codes = {i["code"] for i in validate_batch([prop_relation, prop_retype], vault) if i.get("severity") == "error"}
+    assert "relation-range" in codes
+
+
+def test_claim_domain_uses_declared_subject(vault: Path) -> None:
+    (vault / "02_Areas/Synthetic/Artifact.md").write_text(
+        """---
+id: art:thing
+type: Artifact
+title: Thing
+---
+# Thing
+""",
+        encoding="utf-8",
+    )
+    person = vault / "02_Areas/Synthetic/Person.md"
+    person.write_text(
+        """---
+id: person:p
+type: Person
+title: P
+claims:
+  - id: claim:c
+    subject: art:thing
+    predicate: authored
+    object: entity:beta
+    status: accepted
+---
+# P
+""",
+        encoding="utf-8",
+    )
+    # The note type (Person) is a valid domain for `authored`, but the claim's
+    # declared subject (Artifact) is not; validation must use the subject type.
+    issues = validate_vault_semantics(vault, _schema(vault))
+    assert "relation-domain" in {item.code for item in issues}
+
+
+def test_relation_validity_fields_are_projected(vault: Path) -> None:
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    alpha.write_text(
+        """---
+id: entity:alpha
+type: Entity
+title: Alpha
+relations:
+  - predicate: related_to
+    target: entity:beta
+    valid_from: 2026-01-01
+    valid_to: 2026-06-01
+    recorded_at: 2026-01-02T03:00:00+00:00
+---
+# Alpha
+""",
+        encoding="utf-8",
+    )
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        row = idx.conn.execute(
+            "SELECT valid_from,valid_to,recorded_at FROM relations "
+            "WHERE source_id='entity:alpha' AND predicate='related_to'"
+        ).fetchone()
+        assert row["valid_from"] == "2026-01-01"
+        assert row["valid_to"] == "2026-06-01"
+        recorded_at = str(row["recorded_at"])
+        assert recorded_at.startswith("2026-01-02") and "03:00:00" in recorded_at
+
+
+def test_imported_relation_derivation_is_valid(vault: Path) -> None:
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    alpha.write_text(
+        """---
+id: entity:alpha
+type: Entity
+title: Alpha
+relations:
+  - predicate: related_to
+    target: entity:beta
+    derivation: imported
+---
+# Alpha
+""",
+        encoding="utf-8",
+    )
+    issues = validate_vault_semantics(vault, _schema(vault))
+    assert "invalid-derivation" not in {item.code for item in issues}
+
+
+def test_invalid_object_status_is_rejected(vault: Path) -> None:
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    alpha.write_text(alpha.read_text(encoding="utf-8").replace("status: active", "status: accpeted"), encoding="utf-8")
+    issues = validate_vault_semantics(vault, _schema(vault))
+    assert "invalid-object-status" in {item.code for item in issues}
+
+
+def test_claim_requires_stable_id(vault: Path) -> None:
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    alpha.write_text(
+        """---
+id: entity:alpha
+type: Entity
+title: Alpha
+claims:
+  - predicate: related_to
+    object: entity:beta
+    status: accepted
+---
+# Alpha
+""",
+        encoding="utf-8",
+    )
+    issues = validate_vault_semantics(vault, _schema(vault))
+    assert "missing-claim-id" in {item.code for item in issues}
+
+
+def test_trace_excludes_inferred_edges_by_default(vault: Path) -> None:
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    alpha.write_text(
+        """---
+id: entity:alpha
+type: Entity
+title: Alpha
+relations:
+  - predicate: related_to
+    target: entity:beta
+    derivation: inferred
+    status: accepted
+---
+# Alpha
+""",
+        encoding="utf-8",
+    )
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        assert idx.trace("entity:alpha", "entity:beta") == []
+        assert idx.trace("entity:alpha", "entity:beta", include_derived=True) == ["entity:alpha", "entity:beta"]
+
+
+def test_contradiction_candidates_not_duplicated(vault: Path) -> None:
+    (vault / "02_Areas/Synthetic/Gamma.md").write_text(
+        """---
+id: entity:gamma
+type: Entity
+title: Gamma
+---
+# Gamma
+""",
+        encoding="utf-8",
+    )
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    alpha.write_text(
+        """---
+id: entity:alpha
+type: Entity
+title: Alpha
+claims:
+  - id: claim:a
+    predicate: related_to
+    object: entity:beta
+    status: accepted
+    valid_from: 2026-01-01
+  - id: claim:b
+    predicate: related_to
+    object: entity:gamma
+    status: accepted
+    valid_from: 2026-01-01
+---
+# Alpha
+""",
+        encoding="utf-8",
+    )
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        # Accepted claims are also projected into relations; the contradiction
+        # must be reported once, not once per projection surface.
+        assert len(idx.contradiction_candidates()) == 1
+
+
+def test_index_connection_is_usable_across_threads(vault: Path) -> None:
+    import threading
+
+    with RuntimeIndex(_db(vault)) as idx:
+        idx.build(vault, _schema(vault))
+        result: dict[str, int] = {}
+
+        def worker() -> None:
+            result["objects"] = idx.health()["objects"]
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        thread.join()
+        assert result["objects"] == 2
+
+
+def test_export_refuses_protected_and_unowned_destinations(vault: Path) -> None:
+    with pytest.raises(ValueError, match="protected"):
+        export_okf_bundle(vault, vault / ".agent")
+    victim = vault / "02_Areas/Synthetic"
+    (victim / ".knowledge-ignore").write_text("scan-ignore", encoding="utf-8")
+    with pytest.raises(ValueError, match="ownership manifest"):
+        export_okf_bundle(vault, victim)
+    assert (victim / "Alpha.md").exists()

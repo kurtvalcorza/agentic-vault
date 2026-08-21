@@ -269,7 +269,8 @@ class ExtendedKnowledgeIndex(KnowledgeIndex):
         ]
         return {"object_id": object_id, "as_of": as_of, "claims": claims, "timeline": timeline}
 
-    def impact(self, object_id: str, max_depth: int = 3) -> list[dict[str, Any]]:
+    def impact(self, object_id: str, max_depth: int = 3, include_derived: bool = False) -> list[dict[str, Any]]:
+        derived_clause = "" if include_derived else " AND derivation!='inferred'"
         queue = deque([(object_id, 0)])
         seen = {object_id}
         out = []
@@ -278,7 +279,7 @@ class ExtendedKnowledgeIndex(KnowledgeIndex):
             if depth >= max_depth:
                 continue
             for row in self.conn.execute(
-                "SELECT * FROM relations WHERE status='accepted' AND (source_id=? OR target_id=?)", (node, node)
+                "SELECT * FROM relations WHERE status='accepted'" + derived_clause + " AND (source_id=? OR target_id=?)", (node, node)
             ):
                 if row["predicate"] not in {"depends_on", "dependency_of", "part_of", "has_part"}:
                     continue
@@ -292,7 +293,7 @@ class ExtendedKnowledgeIndex(KnowledgeIndex):
 
     def communities(self) -> list[dict[str, Any]]:
         adj: dict[str, set[str]] = defaultdict(set)
-        for row in self.conn.execute("SELECT source_id,target_id FROM relations WHERE status='accepted'"):
+        for row in self.conn.execute("SELECT source_id,target_id FROM relations WHERE status='accepted' AND derivation!='inferred'"):
             adj[row["source_id"]].add(row["target_id"])
             adj[row["target_id"]].add(row["source_id"])
         for row in self.conn.execute("SELECT id FROM objects"):
@@ -317,7 +318,7 @@ class ExtendedKnowledgeIndex(KnowledgeIndex):
 
     def central_objects(self, limit: int = 20) -> list[dict[str, Any]]:
         degree = Counter()
-        for row in self.conn.execute("SELECT source_id,target_id FROM relations WHERE status='accepted'"):
+        for row in self.conn.execute("SELECT source_id,target_id FROM relations WHERE status='accepted' AND derivation!='inferred'"):
             degree[row["source_id"]] += 1
             degree[row["target_id"]] += 1
         return [{"id": oid, "degree": value} for oid, value in degree.most_common(limit)]

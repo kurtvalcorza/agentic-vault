@@ -152,19 +152,22 @@ def _validate_statement(path: str, raw: dict[str, Any], prefix: str, registry: d
     return issues
 
 
-def _scan_notes(vault_root: Path, replacement: tuple[Path, str] | None = None) -> tuple[list[ValidationIssue], list[ParsedNote]]:
+def _scan_notes(
+    vault_root: Path,
+    replacements: list[tuple[Path, str]] | None = None,
+) -> tuple[list[ValidationIssue], list[ParsedNote]]:
     issues: list[ValidationIssue] = []
     notes: list[ParsedNote] = []
-    target = replacement[0].resolve() if replacement else None
+    replacements = list(replacements or [])
+    targets = {target.resolve() for target, _ in replacements}
     for path in iter_markdown(vault_root):
-        if target is not None and path.resolve() == target:
+        if path.resolve() in targets:
             continue
         try:
             notes.append(parse_note(path, vault_root))
         except Exception as exc:
             issues.append(ValidationIssue(str(path.relative_to(vault_root)), "parse-error", str(exc)))
-    if replacement:
-        target_path, content = replacement
+    for target_path, content in replacements:
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 temp = Path(tmp) / target_path.name
@@ -184,12 +187,12 @@ def _scan_notes(vault_root: Path, replacement: tuple[Path, str] | None = None) -
 def scan_vault_semantics(
     vault_root: Path,
     schema_root: Path,
-    replacement: tuple[Path, str] | None = None,
+    replacements: list[tuple[Path, str]] | None = None,
 ) -> tuple[list[ValidationIssue], list[ParsedNote]]:
     registry = load_relation_registry_with_extensions(schema_root)
     class_specs = load_class_specs(schema_root)
     extension_classes = {name for name in class_specs if name not in SEMANTIC_TYPES}
-    issues, notes = _scan_notes(vault_root, replacement)
+    issues, notes = _scan_notes(vault_root, replacements)
     ids: dict[str, ParsedNote] = {}
     aliases: dict[str, set[str]] = {}
     claim_ids: dict[str, str] = {}
@@ -213,6 +216,8 @@ def scan_vault_semantics(
             if field in note.frontmatter and not _date(note.frontmatter.get(field)):
                 issues.append(ValidationIssue(p, "invalid-object-time", f"{field} must be ISO YYYY-MM-DD"))
         status = str(note.frontmatter.get("status") or "accepted")
+        if status not in STATUSES | {"merged"}:
+            issues.append(ValidationIssue(p, "invalid-object-status", f"object status {status!r} is not a valid lifecycle value"))
         if status == "merged" and not note.frontmatter.get("redirect_to"):
             issues.append(ValidationIssue(p, "missing-redirect", "merged object requires redirect_to"))
         for alias in (note.title, *note.aliases):
@@ -230,6 +235,11 @@ def scan_vault_semantics(
                 if not isinstance(claim, dict):
                     issues.append(ValidationIssue(p, "invalid-claim", f"claims[{i}] must be a mapping"))
                     continue
+                if not claim.get("id"):
+                    issues.append(ValidationIssue(
+                        p, "missing-claim-id",
+                        f"claims[{i}] requires an explicit stable id; list-position ids are unstable across edits",
+                    ))
                 cid = str(claim.get("id") or f"claim:{oid}:{i}")
                 if cid in claim_ids:
                     issues.append(ValidationIssue(p, "duplicate-claim-id", f"claim id {cid} also used by {claim_ids[cid]}"))
@@ -254,11 +264,18 @@ def scan_vault_semantics(
             pred = str(statement["predicate"])
             target = str(statement[target_key])
             spec = registry.get(pred) or {}
-            src_type = note.object_type or "KnowledgeObject"
+            # A claim may declare an explicit subject distinct from its containing
+            # note; domain must be checked against the subject object's type.
+            if target_key == "object":
+                subject_ref = str(statement.get("subject") or note.object_id or "")
+            else:
+                subject_ref = str(note.object_id or "")
+            subject_note = ids.get(subject_ref)
+            src_type = subject_note.object_type if subject_note else None
             tgt_type = ids[target].object_type if target in ids else None
             domain = set(spec.get("domain") or [])
             range_ = set(spec.get("range") or [])
-            if domain and not _type_allowed(src_type, domain, class_specs):
+            if src_type and domain and not _type_allowed(src_type, domain, class_specs):
                 issues.append(ValidationIssue(p, "relation-domain", f"{prefix}: {pred} does not allow source type {src_type}"))
             if tgt_type and range_ and not _type_allowed(tgt_type, range_, class_specs):
                 issues.append(ValidationIssue(p, "relation-range", f"{prefix}: {pred} does not allow target type {tgt_type}"))
@@ -275,4 +292,10 @@ def validate_vault_semantics(vault_root: Path, schema_root: Path) -> list[Valida
 
 def validate_candidate_semantics(content: str, target_path: Path, vault_root: Path) -> list[ValidationIssue]:
     _, schema_root, _ = vault_roots(vault_root)
-    return scan_vault_semantics(vault_root, schema_root, (target_path, content))[0]
+    return scan_vault_semantics(vault_root, schema_root, [(target_path, content)])[0]
+
+
+def validate_batch_semantics(replacements: list[tuple[Path, str]], vault_root: Path) -> list[ValidationIssue]:
+    """Validate the combined final state of a multi-file batch applied simultaneously."""
+    _, schema_root, _ = vault_roots(vault_root)
+    return scan_vault_semantics(vault_root, schema_root, replacements)[0]
