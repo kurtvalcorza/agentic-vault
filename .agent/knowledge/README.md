@@ -123,6 +123,52 @@ vault-knowledge-mcp
 
 Set `AGENTIC_VAULT_ROOT` when the process is launched outside the vault root. The server exposes semantic operations for validation, resolution, search/retrieval, graph traversal, claims/evidence, temporal state, health/analytics, and proposal/validation/apply workflows. MCP contains no unique business logic; the CLI/tests use the same runtime library.
 
+### Wiring it into a client
+
+Copy `.mcp.json.example` to `.mcp.json` and point `command` at the interpreter
+that has the runtime installed:
+
+```json
+{
+  "mcpServers": {
+    "vault-knowledge": {
+      "type": "stdio",
+      "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
+      "args": ["${CLAUDE_PROJECT_DIR:-.}/.agent/scripts/vault-knowledge-mcp.py"]
+    }
+  }
+}
+```
+
+`.agent/scripts/vault-knowledge-mcp.py` exists because neither of the server's
+two ways of finding the vault survives contact with a real MCP client:
+
+- **Working directory** is not guaranteed. Clients spawn stdio servers from
+  wherever they happen to be, so the `AGENTIC_VAULT_ROOT` default of `.` is a
+  coin flip.
+- **Variable expansion is client-specific.** Claude Code expands `${VAR}` in
+  `command` and `args`, but sets `CLAUDE_PROJECT_DIR` in the *server's*
+  environment rather than its own — so a bare `${CLAUDE_PROJECT_DIR}` expands to
+  nothing and the `:-.` default is required. Expansion inside `env` is not
+  documented for project scope at all. Other clients differ again.
+
+The launcher sidesteps both by resolving the vault root from its own location.
+No absolute path ends up in any client config, and the same entry works on every
+machine that clones the vault. Verified by spawning it from an unrelated working
+directory with no environment preset: 22 tools listed, correct vault resolved.
+
+**Writes stay off unless you turn them on.** The launcher defaults
+`AGENTIC_VAULT_KNOWLEDGE_READ_ONLY` to `1`, so `knowledge_apply_patch` and
+`knowledge_apply_batch` raise `PermissionError`. They mutate canonical Markdown —
+treat enabling them as an outward state change, not a config tweak:
+
+```json
+"env": { "AGENTIC_VAULT_KNOWLEDGE_READ_ONLY": "0" }
+```
+
+**stdout is the JSON-RPC channel.** Anything a wrapper prints there corrupts the
+protocol. If you write your own launcher, send diagnostics to stderr.
+
 ## Extensions
 
 The public core stays domain-neutral. Downstream/private vaults may add classes and predicates under `schema/extensions/*.yaml`; extensions load deterministically and may not shadow core definitions. Provider/model-specific code belongs in adapters, not in the canonical schema.
