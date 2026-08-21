@@ -20,11 +20,26 @@ Stop. A parse error anywhere fails the whole build and the index is not updated.
 
 - The index is never quietly partial. A query cannot return "no results" because
   a file failed to parse three days ago and nobody noticed.
-- **`build --full` is an exception, and it is not currently safe.**
+- **Incremental builds are all-or-nothing, but only because of which class
+  implements them.** `RuntimeIndex.build` resolves to
+  `ExtendedKnowledgeIndex.build` (`advanced.py`), which scans and validates the
+  entire vault first and returns *before any database write* if any issue has
+  severity `error`. Verified by
+  `test_failed_incremental_build_leaves_projection_untouched`: a simultaneous
+  edit, deletion and unparseable file leave the projection byte-identical, still
+  so after reopening the database.
+
+  The base `KnowledgeIndex.build` in `core.py` behaves differently — it upserts
+  as it iterates, removes stale rows, and calls `commit()` unconditionally, so a
+  parse error there *would* leave a partially updated projection. It is not on
+  the path any entry point takes (`cli.py` and `mcp_server.py` construct
+  `RuntimeIndex` only), but reading `core.py` and assuming it is the shipped
+  behaviour is an easy and repeated mistake. Check the MRO before concluding
+  anything about build atomicity.
+- **`build --full` is the genuine exception, and it is not currently safe.**
   `RuntimeIndex.rebuild()` closes the connection and `unlink()`s the database
-  *before* parsing anything, so a full rebuild that then hits a parse error
-  leaves no index at all — the previous valid projection is already gone. The
-  incremental `build()` path does not have this problem.
+  *before* validation runs, so a full rebuild that then hits a parse error leaves
+  no index at all — the previous valid projection is already gone.
   This is availability loss, not data loss: Markdown remains canonical
   ([[0001-markdown-is-canonical]]) and the projection is reconstructible once the
   offending file is fixed. But "a failed build leaves the previous index intact"

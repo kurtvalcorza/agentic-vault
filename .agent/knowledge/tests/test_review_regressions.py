@@ -1480,6 +1480,45 @@ def test_malformed_id_syntax_caught_by_the_parser(vault: Path, object_id: str, r
     assert "parse-error" in _codes_for_id(vault, object_id), "should reject: " + reason
 
 
+def test_failed_incremental_build_leaves_projection_untouched(vault: Path) -> None:
+    """A failed incremental build must not commit a partial projection.
+
+    `RuntimeIndex.build` resolves to `ExtendedKnowledgeIndex.build`, which scans
+    and validates the whole vault *before* writing anything and returns early if
+    any issue has severity "error". The base `KnowledgeIndex.build` in core.py
+    does upsert-as-it-goes and commits unconditionally — reading that one and
+    assuming it is the shipped path is an easy mistake, and this test exists so
+    the difference is enforced rather than merely described (ADR-0005).
+    """
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    beta = vault / "02_Areas/Synthetic/Beta.md"
+    db = _db(vault)
+
+    with RuntimeIndex(db) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        assert idx.get("entity:alpha")["title"] == "Sample Project"
+
+        # A valid edit, a deletion, and a new unparseable file, all at once.
+        alpha.write_text(
+            "---\nid: entity:alpha\ntype: Entity\ntitle: EDITED\n---\n# Alpha\n", encoding="utf-8"
+        )
+        beta.unlink()
+        (vault / "02_Areas/Synthetic/broken.md").write_text(
+            "---\ntitle: {{placeholder}}\n---\n# broken\n", encoding="utf-8"
+        )
+
+        issues = idx.build(vault, _schema(vault))
+        assert "parse-error" in {i.code for i in issues}
+        # None of the other three changes may have landed.
+        assert idx.get("entity:alpha")["title"] == "Sample Project", "edit was projected anyway"
+        assert idx.get("entity:beta") is not None, "deletion was projected anyway"
+
+    # Reopening proves nothing was committed, rather than merely buffered.
+    with RuntimeIndex(db) as reopened:
+        assert reopened.get("entity:alpha")["title"] == "Sample Project"
+        assert reopened.get("entity:beta") is not None
+
+
 def test_id_rule_only_applies_to_semantic_notes(vault: Path) -> None:
     """A note with no `id` is non-semantic and must not be judged by this rule.
 
