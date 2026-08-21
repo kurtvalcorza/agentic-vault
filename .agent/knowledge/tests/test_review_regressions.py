@@ -697,3 +697,23 @@ def test_refresh_detects_content_change_with_stable_mtime(vault: Path) -> None:
         after = idx.get("entity:alpha")["title"]
     assert before == "Sample Project"
     assert after == "Sample Projekt"
+
+
+def test_batch_rechecks_create_target_absence_after_validation(vault: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentic_vault_knowledge import transactions
+
+    new_path = vault / "02_Areas/Synthetic/New.md"
+    proposal = propose_entity(vault, "02_Areas/Synthetic/New.md", {
+        "id": "entity:new", "type": "Entity", "title": "New Entity",
+    })
+
+    def racing_validate(proposals: list, root: Path) -> list:
+        # Simulate a concurrent create landing on the target during validation.
+        new_path.write_text("---\nid: entity:other\ntype: Entity\ntitle: Other\n---\n", encoding="utf-8")
+        return []
+
+    monkeypatch.setattr(transactions, "validate_batch", racing_validate)
+    with pytest.raises(ConflictError):
+        transactions.apply_batch([proposal], vault)
+    # The concurrently-created file was not overwritten by the stale create.
+    assert "entity:other" in new_path.read_text(encoding="utf-8")
