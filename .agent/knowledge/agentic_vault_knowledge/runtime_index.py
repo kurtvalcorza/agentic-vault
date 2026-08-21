@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import sqlite3
 from pathlib import Path
@@ -69,18 +70,25 @@ class RuntimeIndex(ExtendedKnowledgeIndex):
         self.conn.commit()
 
     def _fingerprint(self, vault_root: Path, schema_root: Path) -> tuple:
+        # Include a content digest, not just (mtime, size): a sync tool or editor
+        # can preserve mtime and byte length across a real edit, and a
+        # metadata-only fingerprint would then skip the rebuild and serve stale
+        # objects. The digest cannot stay equal when canonical bytes change.
         files = []
         for path in iter_markdown(vault_root):
             stat = path.stat()
-            files.append((str(path.relative_to(vault_root)).replace("\\", "/"), stat.st_mtime_ns, stat.st_size))
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            files.append((str(path.relative_to(vault_root)).replace("\\", "/"), stat.st_mtime_ns, stat.st_size, digest))
         schema_files = []
         for path in sorted(schema_root.rglob("*.yaml")):
             stat = path.stat()
-            schema_files.append((str(path.relative_to(schema_root)), stat.st_mtime_ns, stat.st_size))
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            schema_files.append((str(path.relative_to(schema_root)), stat.st_mtime_ns, stat.st_size, digest))
         version = schema_root / "VERSION"
         if version.exists():
             stat = version.stat()
-            schema_files.append(("VERSION", stat.st_mtime_ns, stat.st_size))
+            digest = hashlib.sha256(version.read_bytes()).hexdigest()
+            schema_files.append(("VERSION", stat.st_mtime_ns, stat.st_size, digest))
         return tuple(sorted(files)), tuple(schema_files)
 
     def refresh(self, vault_root: Path, schema_root: Path) -> list[ValidationIssue]:

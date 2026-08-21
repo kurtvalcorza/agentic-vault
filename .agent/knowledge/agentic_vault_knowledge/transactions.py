@@ -11,6 +11,7 @@ from .core import (
     KnowledgeError,
     _identity_guard_issues,
     _is_create,
+    _reject_unwritable_target,
     _resolve_vault_path,
     parse_note,
     sha256_text,
@@ -57,6 +58,12 @@ def validate_batch(proposals: list[dict[str, Any]], vault_root: Path) -> list[di
             out.append({"path": str(path), "code": "duplicate-path", "message": "batch contains multiple writes to same path", "severity": "error"})
             continue
         seen_paths.add(path)
+
+        try:
+            _reject_unwritable_target(path, vault_root)
+        except KnowledgeError as exc:
+            out.append({"path": str(path), "code": "unwritable-target", "message": str(exc), "severity": "error"})
+            continue
 
         out.extend(item.__dict__ for item in _identity_guard_issues(proposal, path))
 
@@ -128,6 +135,20 @@ def apply_batch(proposals: list[dict[str, Any]], vault_root: Path) -> list[str]:
                 handle.flush()
                 os.fsync(handle.fileno())
             staged[path] = Path(tmp)
+        # Post-validation, pre-commit recheck: validate_batch scanned the whole
+        # vault, which can race a concurrent edit or a newly-created target. Verify
+        # every source hash and every create-target absence again immediately
+        # before the first replacement; abort the whole batch on any mismatch so no
+        # proposal is applied over content the caller never saw.
+        for proposal in proposals:
+            path = _resolve_vault_path(proposal["path"], vault_root)
+            if _is_create(proposal):
+                if path.exists():
+                    raise ConflictError(f"create target appeared during validation: {path}")
+            elif not path.exists():
+                raise ConflictError(f"source removed during validation: {path}")
+            elif sha256_text(path.read_text(encoding="utf-8")) != proposal.get("base_hash"):
+                raise ConflictError(f"source changed during validation: {path}")
         for path, tmp in staged.items():
             os.replace(tmp, path)
             replaced.append(path)

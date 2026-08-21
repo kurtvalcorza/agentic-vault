@@ -30,5 +30,15 @@ Address the second review pass on PR #3 (Codex, against head `99b2e3e`) for the 
 ## Safety / Provenance
 Changes are generic, synthetic, and agent-agnostic. Markdown/YAML remains authoritative; derived SQLite/FTS projections and OKF bundles remain disposable. No private vault content, credentials, or domain-specific ontology introduced. No coupling to any specific agent (Claude/Codex/Gemini/Kiro).
 
+## Third pass (head f2c8a5e review)
+- Batch writes: recheck every source hash and create-target absence after full-vault validation, immediately before the first replacement; abort the whole batch on any mismatch (closes the `apply_batch` TOCTOU the human review flagged as the remaining blocker).
+- Semantic-demotion check now applies to `migrate`/`merge` operations too; only the stable-ID comparison is exempted for them.
+- Restricted the write API to canonical Markdown outside protected workspaces (`.git`, `.claude`, `.gemini`, `.kiro`, `.codex`, `.obsidian`, generated/scan-excluded dirs).
+- Relation contradiction candidates now require overlapping projected validity intervals instead of equal legacy `event_time`.
+- `timeline` authored as a mapping/scalar (not a list) now raises `invalid-timeline` instead of being silently dropped.
+- Refresh fingerprint now includes a content digest, so a same-length edit with a preserved mtime is no longer skipped.
+- CI workflow triggers now include canonical knowledge dirs (`Inbox/`, `01_Projects/`–`04_Archives/`) so note-only PRs still run whole-vault validation.
+- Added regression tests for each of the above.
+
 ## Status
 Review fixes implemented on `feat/knowledge-runtime-rfc-2`; PR #3 remains the review surface. Full local pytest (excluding the LinkML-dependency test, which CI runs) is green; `validate` / `build --full` / `health` on the public vault report zero issues.

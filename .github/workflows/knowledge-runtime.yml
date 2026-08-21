@@ -6,11 +6,25 @@ on:
       - '.agent/knowledge/**'
       - '.agent/skills/knowledge-runtime/**'
       - '.github/workflows/knowledge-runtime.yml'
+      # Canonical knowledge locations: a note-only change must still run
+      # whole-vault semantic validation (duplicate IDs, invalid claims, etc.).
+      - 'Inbox/**'
+      - '01_Projects/**'
+      - '02_Areas/**'
+      - '03_Resources/**'
+      - '04_Archives/**'
   push:
     paths:
       - '.agent/knowledge/**'
       - '.agent/skills/knowledge-runtime/**'
       - '.github/workflows/knowledge-runtime.yml'
+      # Canonical knowledge locations: a note-only change must still run
+      # whole-vault semantic validation (duplicate IDs, invalid claims, etc.).
+      - 'Inbox/**'
+      - '01_Projects/**'
+      - '02_Areas/**'
+      - '03_Resources/**'
+      - '04_Archives/**'
 
 jobs:
   test:

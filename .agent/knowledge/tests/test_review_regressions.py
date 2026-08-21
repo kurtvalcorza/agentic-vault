@@ -563,3 +563,137 @@ def test_export_refuses_protected_and_unowned_destinations(vault: Path) -> None:
     with pytest.raises(ValueError, match="ownership manifest"):
         export_okf_bundle(vault, victim)
     assert (victim / "Alpha.md").exists()
+
+
+# --- Third review pass (head f2c8a5e) regression coverage ---
+
+
+def test_batch_rechecks_hash_after_validation(vault: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentic_vault_knowledge import transactions
+
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    beta = vault / "02_Areas/Synthetic/Beta.md"
+    prop_a = propose_frontmatter_patch(alpha, {"updated": "2026-08-21"})
+    prop_b = propose_frontmatter_patch(beta, {"updated": "2026-08-21"})
+    original_alpha = alpha.read_text(encoding="utf-8")
+
+    def racing_validate(proposals: list, root: Path) -> list:
+        # Simulate a concurrent edit landing on a target during validation.
+        beta.write_text(beta.read_text(encoding="utf-8") + "\nconcurrent edit\n", encoding="utf-8")
+        return []
+
+    monkeypatch.setattr(transactions, "validate_batch", racing_validate)
+    with pytest.raises(ConflictError):
+        transactions.apply_batch([prop_a, prop_b], vault)
+    # No proposal was applied: the untouched target is unchanged.
+    assert alpha.read_text(encoding="utf-8") == original_alpha
+
+
+def test_migrate_operation_still_rejects_demotion(vault: Path) -> None:
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    demote = {
+        "operation": "migrate",
+        "path": str(alpha),
+        "base_hash": sha256_text(alpha.read_text(encoding="utf-8")),
+        "content": "# stripped\n",
+    }
+    codes = {item.code for item in validate_patch(demote, vault) if item.severity == "error"}
+    assert "semantic-demotion" in codes
+    # A migrate that keeps the note semantic may change the id without tripping.
+    renamed = propose_frontmatter_patch(alpha, {"id": "entity:renamed"})
+    renamed["operation"] = "migrate"
+    codes2 = {item.code for item in validate_patch(renamed, vault) if item.severity == "error"}
+    assert "identity-change" not in codes2 and "semantic-demotion" not in codes2
+
+
+def test_patch_rejects_protected_workspace_target(vault: Path) -> None:
+    (vault / ".claude").mkdir(exist_ok=True)
+    protected = vault / ".claude/settings.md"
+    protected.write_text("---\nid: x:y\ntype: Entity\ntitle: X\n---\n", encoding="utf-8")
+    proposal = propose_frontmatter_patch(protected, {"title": "Z"})
+    with pytest.raises(KnowledgeError, match="protected workspace"):
+        apply_patch(proposal, vault)
+    non_markdown = vault / "02_Areas/Synthetic/data.txt"
+    non_markdown.write_text("hi", encoding="utf-8")
+    proposal2 = {"path": str(non_markdown), "base_hash": sha256_text("hi"), "content": "bye"}
+    with pytest.raises(KnowledgeError, match="Markdown"):
+        apply_patch(proposal2, vault)
+
+
+def test_relation_contradictions_require_overlapping_validity(vault: Path) -> None:
+    (vault / "02_Areas/Synthetic/Gamma.md").write_text(
+        """---
+id: entity:gamma
+type: Entity
+title: Gamma
+---
+# Gamma
+""",
+        encoding="utf-8",
+    )
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    non_overlapping = """---
+id: entity:alpha
+type: Entity
+title: Alpha
+relations:
+  - predicate: related_to
+    target: entity:beta
+    valid_from: 2026-01-01
+    valid_to: 2026-06-01
+  - predicate: related_to
+    target: entity:gamma
+    valid_from: 2026-07-01
+    valid_to: 2026-12-01
+---
+# Alpha
+"""
+    alpha.write_text(non_overlapping, encoding="utf-8")
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        assert idx.contradiction_candidates() == []
+        # Make the two intervals overlap; now they contradict.
+        alpha.write_text(non_overlapping.replace("2026-07-01", "2026-03-01"), encoding="utf-8")
+        assert idx.build(vault, _schema(vault)) == []
+        assert len(idx.contradiction_candidates()) == 1
+
+
+def test_timeline_must_be_a_list(vault: Path) -> None:
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    alpha.write_text(
+        """---
+id: entity:alpha
+type: Entity
+title: Alpha
+timeline:
+  event_time: 2026-01-01
+  transaction_time: 2026-01-01
+  claim: single
+  source: source:x
+---
+# Alpha
+""",
+        encoding="utf-8",
+    )
+    issues = validate_vault_semantics(vault, _schema(vault))
+    assert "invalid-timeline" in {item.code for item in issues}
+
+
+def test_refresh_detects_content_change_with_stable_mtime(vault: Path) -> None:
+    import os
+
+    path = vault / "02_Areas/Synthetic/Alpha.md"
+    stat = path.stat()
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.refresh(vault, _schema(vault)) == []
+        before = idx.get("entity:alpha")["title"]
+        text = path.read_text(encoding="utf-8")
+        assert "Sample Project" in text
+        # Same-length edit, then restore the original mtime — a metadata-only
+        # fingerprint would miss this and serve stale data.
+        path.write_text(text.replace("Sample Project", "Sample Projekt"), encoding="utf-8")
+        os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        idx.refresh(vault, _schema(vault))
+        after = idx.get("entity:alpha")["title"]
+    assert before == "Sample Project"
+    assert after == "Sample Projekt"

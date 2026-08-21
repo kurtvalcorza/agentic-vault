@@ -279,6 +279,11 @@ def validate_note(note: ParsedNote, relation_registry: dict[str, Any] | None = N
             issues.append(ValidationIssue(p, "invalid-confidence", "confidence must be between 0 and 1"))
         if not _valid_date(rel.event_time) or not _valid_date(rel.transaction_time):
             issues.append(ValidationIssue(p, "invalid-relation-time", "relation dates must be ISO YYYY-MM-DD"))
+    raw_timeline = note.frontmatter.get("timeline")
+    if raw_timeline is not None and not isinstance(raw_timeline, list):
+        # A single mapping (or scalar) is silently dropped during parsing; surface
+        # it here so malformed canonical timeline data cannot masquerade as valid.
+        issues.append(ValidationIssue(p, "invalid-timeline", "timeline must be a list of entries"))
     for i, item in enumerate(note.timeline):
         if not isinstance(item, dict):
             issues.append(ValidationIssue(p, "invalid-timeline", f"timeline[{i}] must be a mapping"))
@@ -515,13 +520,20 @@ class KnowledgeIndex:
         )]
 
     def contradiction_candidates(self) -> list[dict[str, Any]]:
+        # Two accepted relations on the same subject/predicate with different
+        # targets contradict only when their validity intervals overlap, matching
+        # the claim contradiction logic. Missing bounds are treated as open.
         rows = self.conn.execute(
             "SELECT a.source_id,a.predicate,a.target_id AS left_target,b.target_id AS right_target,"
-            "a.event_time,a.id AS left_id,b.id AS right_id FROM relations a JOIN relations b "
+            "a.id AS left_id,b.id AS right_id,"
+            "a.valid_from AS left_valid_from,a.valid_to AS left_valid_to,"
+            "b.valid_from AS right_valid_from,b.valid_to AS right_valid_to "
+            "FROM relations a JOIN relations b "
             "ON a.source_id=b.source_id AND a.predicate=b.predicate AND a.id<b.id "
             "WHERE a.status='accepted' AND b.status='accepted' AND a.target_id<>b.target_id "
             "AND a.path NOT LIKE '__claim__:%' AND b.path NOT LIKE '__claim__:%' "
-            "AND COALESCE(a.event_time,'')=COALESCE(b.event_time,'')"
+            "AND COALESCE(a.valid_from,'0001-01-01') <= COALESCE(b.valid_to,'9999-12-31') "
+            "AND COALESCE(b.valid_from,'0001-01-01') <= COALESCE(a.valid_to,'9999-12-31')"
         )
         return [dict(r) for r in rows]
 
@@ -581,6 +593,24 @@ def _resolve_vault_path(raw_path: str | Path, vault_root: Path) -> Path:
     return path
 
 
+# Directories the mutation API must never write into: version control, per-agent
+# configuration workspaces, and scan-excluded / generated locations. Canonical
+# knowledge lives in Markdown notes, never in these.
+PROTECTED_TARGET_DIRNAMES = {
+    ".git", ".claude", ".gemini", ".kiro", ".codex", ".obsidian",
+    ".venv", "node_modules", "__pycache__", "generated",
+}
+
+
+def _reject_unwritable_target(path: Path, vault_root: Path) -> None:
+    """Restrict the write API to canonical Markdown outside protected workspaces."""
+    if path.suffix.lower() != ".md":
+        raise KnowledgeError(f"patch target must be a Markdown file: {path}")
+    rel = path.resolve().relative_to(vault_root.resolve())
+    if any(part in PROTECTED_TARGET_DIRNAMES for part in rel.parts):
+        raise KnowledgeError(f"patch target is inside a protected workspace: {path}")
+
+
 def propose_frontmatter_patch(path: Path, patch: dict[str, Any]) -> dict[str, Any]:
     text = path.read_text(encoding="utf-8")
     before_hash = sha256_text(text)
@@ -598,13 +628,17 @@ def _parse_candidate_note(content: str) -> ParsedNote:
         return parse_note(candidate)
 
 
-IDENTITY_EXEMPT_OPERATIONS = {"create", "migrate", "merge"}
+# Operations exempt from the stable-ID comparison (they legitimately change the
+# id). The semantic-demotion check still applies to them: an existing semantic
+# note must never silently lose its frontmatter, whatever the operation.
+ID_CHANGE_EXEMPT_OPERATIONS = {"migrate", "merge"}
 
 
 def _identity_guard_issues(proposal: dict[str, Any], path: Path) -> list[ValidationIssue]:
     """Reject silent semantic demotion or stable-ID changes on ordinary patches."""
     operation = str(proposal.get("operation") or "update")
-    if operation in IDENTITY_EXEMPT_OPERATIONS or not path.exists():
+    # A create targets a non-existent file, so there is nothing to demote.
+    if operation == "create" or not path.exists():
         return []
     try:
         current = parse_note(path)
@@ -620,9 +654,9 @@ def _identity_guard_issues(proposal: dict[str, Any], path: Path) -> list[Validat
     if not (candidate.semantic and candidate.object_id):
         return [ValidationIssue(
             p, "semantic-demotion",
-            "patch would strip id/type from a semantic object; use an explicit migration",
+            "patch would strip id/type from a semantic object; frontmatter must be retained",
         )]
-    if candidate.object_id != current.object_id:
+    if operation not in ID_CHANGE_EXEMPT_OPERATIONS and candidate.object_id != current.object_id:
         return [ValidationIssue(
             p, "identity-change",
             f"patch changes stable id {current.object_id} -> {candidate.object_id}; "
@@ -634,6 +668,7 @@ def _identity_guard_issues(proposal: dict[str, Any], path: Path) -> list[Validat
 def validate_patch(proposal: dict[str, Any], vault_root: Path) -> list[ValidationIssue]:
     """Validate a candidate in the complete vault context and extension schema."""
     path = _resolve_vault_path(proposal["path"], vault_root)
+    _reject_unwritable_target(path, vault_root)
     from .validation import validate_candidate_semantics
     issues = list(validate_candidate_semantics(str(proposal["content"]), path, vault_root))
     issues.extend(_identity_guard_issues(proposal, path))
@@ -646,6 +681,7 @@ def _is_create(proposal: dict[str, Any]) -> bool:
 
 def apply_patch(proposal: dict[str, Any], vault_root: Path) -> None:
     path = _resolve_vault_path(proposal["path"], vault_root)
+    _reject_unwritable_target(path, vault_root)
     creating = _is_create(proposal)
     if creating:
         if path.exists():
