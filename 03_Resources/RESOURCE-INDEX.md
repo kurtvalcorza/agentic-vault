@@ -27,3 +27,4 @@ Intake rules and the **Source Catalog** for `03_Resources/` — external referen
 | Date Encountered | Title | Author(s) | Type | Status | Notes | Tags |
 |:---|:---|:---|:---|:---|:---|:---|
 | 2026-06-12 | How to Take Smart Notes | Sönke Ahrens | book | reading | [[Reading-List/How to Take Smart Notes]] | #zettelkasten #pkm |
+| 2026-08-21 | uv documentation | Astral | docs | reference | https://docs.astral.sh/uv/ — cited in `.agent/knowledge/README.md`; uv-created venvs ship no `pip` | #tooling #python |
