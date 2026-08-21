@@ -41,7 +41,12 @@ class RuntimeIndex(ExtendedKnowledgeIndex):
 
     def _ensure_relations_schema(self) -> None:
         columns = {r["name"] for r in self.conn.execute("PRAGMA table_info(relations)")}
-        if {"valid_from", "valid_to", "recorded_at"} <= columns:
+        required = {
+            "valid_from", "valid_to", "recorded_at",
+            "extraction_confidence", "claim_confidence", "review_status",
+            "created_by", "reviewed_by_json",
+        }
+        if required <= columns:
             return
         # An older disposable DB predates the canonical relation validity columns.
         # Relations are fully rebuildable from Markdown, so drop and recreate the

@@ -215,6 +215,10 @@ def scan_vault_semantics(
         ids[oid] = note
         if note.object_type not in SEMANTIC_TYPES and note.object_type not in extension_classes:
             issues.append(ValidationIssue(p, "unknown-type", f"semantic type {note.object_type!r} is not core or declared extension"))
+        # title is schema-required; the parser's H1/filename fallback is display-only
+        # and must not let a note without an authored title validate.
+        if not str(note.frontmatter.get("title") or "").strip():
+            issues.append(ValidationIssue(p, "missing-title", "semantic object requires an authored title"))
         ks = note.frontmatter.get("knowledge_schema")
         if ks is not None and not SCHEMA_VERSION_RE.match(str(ks)):
             issues.append(ValidationIssue(p, "invalid-schema-version", "knowledge_schema must be a dotted numeric version"))

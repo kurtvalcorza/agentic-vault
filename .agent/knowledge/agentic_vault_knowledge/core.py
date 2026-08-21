@@ -59,6 +59,11 @@ class Relation:
     valid_to: str | None = None
     recorded_at: str | None = None
     confidence: float | None = None
+    extraction_confidence: float | None = None
+    claim_confidence: float | None = None
+    review_status: str | None = None
+    created_by: str | None = None
+    reviewed_by: tuple[str, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -168,6 +173,14 @@ def _parse_relations(value: Any) -> tuple[Relation, ...]:
             value = raw.get(key)
             return str(value) if value is not None else None
 
+        def _optfloat(key: str) -> float | None:
+            value = raw.get(key)
+            return float(value) if value is not None else None
+
+        reviewed_by = raw.get("reviewed_by") or []
+        if isinstance(reviewed_by, str):
+            reviewed_by = [reviewed_by]
+
         out.append(Relation(
             predicate=str(raw["predicate"]),
             target=str(raw["target"]),
@@ -180,6 +193,11 @@ def _parse_relations(value: Any) -> tuple[Relation, ...]:
             valid_to=_opt("valid_to"),
             recorded_at=_opt("recorded_at"),
             confidence=confidence,
+            extraction_confidence=_optfloat("extraction_confidence"),
+            claim_confidence=_optfloat("claim_confidence"),
+            review_status=_opt("review_status"),
+            created_by=_opt("created_by"),
+            reviewed_by=tuple(str(x) for x in reviewed_by),
         ))
     return tuple(out)
 
@@ -309,7 +327,7 @@ CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY, content_hash TEXT NOT NU
 CREATE TABLE IF NOT EXISTS objects(id TEXT PRIMARY KEY, type TEXT NOT NULL, title TEXT NOT NULL, path TEXT NOT NULL UNIQUE, status TEXT, body TEXT NOT NULL, frontmatter_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS aliases(alias_norm TEXT NOT NULL, object_id TEXT NOT NULL, alias TEXT NOT NULL, PRIMARY KEY(alias_norm, object_id), FOREIGN KEY(object_id) REFERENCES objects(id) ON DELETE CASCADE);
 CREATE TABLE IF NOT EXISTS navigation(source_path TEXT NOT NULL, target_ref TEXT NOT NULL, PRIMARY KEY(source_path,target_ref));
-CREATE TABLE IF NOT EXISTS relations(id INTEGER PRIMARY KEY AUTOINCREMENT, source_id TEXT NOT NULL, predicate TEXT NOT NULL, target_id TEXT NOT NULL, derivation TEXT NOT NULL, status TEXT NOT NULL, event_time TEXT, transaction_time TEXT, valid_from TEXT, valid_to TEXT, recorded_at TEXT, confidence REAL, path TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS relations(id INTEGER PRIMARY KEY AUTOINCREMENT, source_id TEXT NOT NULL, predicate TEXT NOT NULL, target_id TEXT NOT NULL, derivation TEXT NOT NULL, status TEXT NOT NULL, event_time TEXT, transaction_time TEXT, valid_from TEXT, valid_to TEXT, recorded_at TEXT, confidence REAL, extraction_confidence REAL, claim_confidence REAL, review_status TEXT, created_by TEXT, reviewed_by_json TEXT, path TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS evidence(relation_id INTEGER NOT NULL, source TEXT NOT NULL, locator_type TEXT NOT NULL, locator_value TEXT, authority TEXT NOT NULL, FOREIGN KEY(relation_id) REFERENCES relations(id) ON DELETE CASCADE);
 CREATE TABLE IF NOT EXISTS timeline(object_id TEXT NOT NULL, ordinal INTEGER NOT NULL, event_time TEXT NOT NULL, transaction_time TEXT NOT NULL, claim TEXT NOT NULL, source TEXT NOT NULL, PRIMARY KEY(object_id,ordinal), FOREIGN KEY(object_id) REFERENCES objects(id) ON DELETE CASCADE);
 CREATE VIRTUAL TABLE IF NOT EXISTS objects_fts USING fts5(id UNINDEXED, title, body, aliases, tags, content='');
@@ -381,9 +399,11 @@ class KnowledgeIndex:
             )
             for rel in note.relations:
                 cur = self.conn.execute(
-                    "INSERT INTO relations(source_id,predicate,target_id,derivation,status,event_time,transaction_time,valid_from,valid_to,recorded_at,confidence,path) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "INSERT INTO relations(source_id,predicate,target_id,derivation,status,event_time,transaction_time,valid_from,valid_to,recorded_at,confidence,extraction_confidence,claim_confidence,review_status,created_by,reviewed_by_json,path) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (note.object_id, rel.predicate, rel.target, rel.derivation, rel.status,
-                     rel.event_time, rel.transaction_time, rel.valid_from, rel.valid_to, rel.recorded_at, rel.confidence, path),
+                     rel.event_time, rel.transaction_time, rel.valid_from, rel.valid_to, rel.recorded_at, rel.confidence,
+                     rel.extraction_confidence, rel.claim_confidence, rel.review_status, rel.created_by,
+                     json.dumps(list(rel.reviewed_by)), path),
                 )
                 rid = int(cur.lastrowid)
                 self.conn.executemany(
@@ -607,7 +627,7 @@ def _resolve_vault_path(raw_path: str | Path, vault_root: Path) -> Path:
 # configuration workspaces, and scan-excluded / generated locations. Canonical
 # knowledge lives in Markdown notes, never in these.
 PROTECTED_TARGET_DIRNAMES = {
-    ".git", ".claude", ".gemini", ".kiro", ".codex", ".obsidian",
+    ".agent", ".git", ".claude", ".gemini", ".kiro", ".codex", ".obsidian",
     ".venv", "node_modules", "__pycache__", "generated",
 }
 

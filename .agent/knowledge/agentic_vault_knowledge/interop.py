@@ -157,7 +157,7 @@ def import_okf_candidates(bundle_root: Path) -> list[dict[str, Any]]:
         fm, body = split_frontmatter(path.read_text(encoding="utf-8"))
         out.append({
             "concept_id": str(path.relative_to(bundle_root).with_suffix("")).replace("\\", "/"),
-            "frontmatter": fm,
+            "frontmatter": _demote_imported_frontmatter(fm),
             "body": body,
             "status": "candidate",
             "derivation": "imported",
@@ -165,10 +165,33 @@ def import_okf_candidates(bundle_root: Path) -> list[dict[str, Any]]:
     return out
 
 
+def _demote_imported_frontmatter(fm: dict[str, Any]) -> dict[str, Any]:
+    """Never let imported knowledge arrive as canonical: force candidate status
+    and imported derivation on the object and every nested relation/claim, so a
+    caller that hands the frontmatter straight to a proposal cannot create
+    accepted external knowledge."""
+    demoted = dict(fm)
+    demoted["status"] = "candidate"
+    for key in ("relations", "claims"):
+        statements = demoted.get(key)
+        if isinstance(statements, list):
+            normalized = []
+            for statement in statements:
+                if isinstance(statement, dict):
+                    statement = dict(statement)
+                    statement["status"] = "candidate"
+                    statement["derivation"] = "imported"
+                normalized.append(statement)
+            demoted[key] = normalized
+    return demoted
+
+
 def _reject_markdown_output(output: Path) -> None:
-    """Graph exports must never overwrite a canonical Markdown note."""
+    """Graph exports must never overwrite canonical notes or protected config."""
     if output.suffix.lower() == ".md":
         raise ValueError(f"refusing to write a graph export over a Markdown path: {output}")
+    if any(part in PROTECTED_DIRNAMES for part in output.parts):
+        raise ValueError(f"refusing to write a graph export into a protected workspace: {output}")
 
 
 def export_jsonld(index, output: Path) -> dict[str, Any]:

@@ -53,5 +53,13 @@ Changes are generic, synthetic, and agent-agnostic. Markdown/YAML remains author
 - MCP write tools now hold the shared index lock across apply, so no query observes a partial batch.
 - Added regression tests for each.
 
+## Fifth pass (head 612b4c9 review)
+- Graph exports (`export-jsonld`/`export-rdf`) now reject protected-workspace output paths (`.git`, `.agent`, `.claude`, etc.), not just Markdown, preventing config-file clobbering.
+- Added `.agent` to the patch mutation API's protected set so the write path cannot overwrite shared skills/docs in the agent workspace.
+- Required an authored `title` on semantic objects (`missing-title`); the parser's H1/filename fallback is display-only.
+- `import_okf_candidates` now demotes nested object/relation/claim status to `candidate` and derivation to `imported`, so imported knowledge can never arrive as canonical through a proposal.
+- Direct relations now carry review/provenance metadata (`extraction_confidence`, `claim_confidence`, `review_status`, `created_by`, `reviewed_by`) into the projection, with a disposable-DB migration; claim-derived edges populate them too.
+- Added regression tests for each.
+
 ## Status
 Review fixes implemented on `feat/knowledge-runtime-rfc-2`; PR #3 remains the review surface. Full local pytest (excluding the LinkML-dependency test, which CI runs) is green; `validate` / `build --full` / `health` on the public vault report zero issues.

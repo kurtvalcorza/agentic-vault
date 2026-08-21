@@ -17,7 +17,12 @@ from agentic_vault_knowledge.core import (
     split_frontmatter,
     validate_patch,
 )
-from agentic_vault_knowledge.interop import export_jsonld, export_okf_bundle, export_rdf_ntriples
+from agentic_vault_knowledge.interop import (
+    export_jsonld,
+    export_okf_bundle,
+    export_rdf_ntriples,
+    import_okf_candidates,
+)
 from agentic_vault_knowledge.proposals import propose_entity
 from agentic_vault_knowledge.runtime_index import EXPECTED_CLAIM_COLUMNS, RuntimeIndex
 from agentic_vault_knowledge.transactions import validate_batch
@@ -903,3 +908,94 @@ relations:
     content = out.read_text(encoding="utf-8")
     # The inferred edge must not appear as a plain asserted triple.
     assert "relation:related_to" not in content
+
+
+# --- Fifth review pass (head 612b4c9) regression coverage ---
+
+
+def test_graph_export_refuses_protected_config_output(vault: Path) -> None:
+    (vault / ".claude").mkdir(exist_ok=True)
+    (vault / ".git").mkdir(exist_ok=True)
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        with pytest.raises(ValueError, match="protected workspace"):
+            export_jsonld(idx, vault / ".claude/settings.json")
+        with pytest.raises(ValueError, match="protected workspace"):
+            export_rdf_ntriples(idx, vault / ".git/config")
+
+
+def test_semantic_note_requires_authored_title(vault: Path) -> None:
+    note = vault / "02_Areas/Synthetic/NoTitle.md"
+    note.write_text("---\nid: entity:notitle\ntype: Entity\n---\n# Heading Only\n", encoding="utf-8")
+    issues = validate_vault_semantics(vault, _schema(vault))
+    assert "missing-title" in {item.code for item in issues}
+
+
+def test_patch_rejects_agent_workspace_target(vault: Path) -> None:
+    target = vault / ".agent/skills/demo/SKILL.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("---\nid: x:y\ntype: Entity\ntitle: X\n---\n", encoding="utf-8")
+    proposal = propose_frontmatter_patch(target, {"title": "Z"})
+    with pytest.raises(KnowledgeError, match="protected workspace"):
+        apply_patch(proposal, vault)
+
+
+def test_okf_import_demotes_nested_status_and_derivation(vault: Path, tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / ".knowledge-ignore").write_text("x", encoding="utf-8")
+    (bundle / "index.md").write_text("---\nokf_version: '0.2'\ntype: Index\ntitle: I\n---\n", encoding="utf-8")
+    (bundle / "C.md").write_text(
+        """---
+id: concept:c
+type: Concept
+title: C
+status: accepted
+relations:
+  - predicate: related_to
+    target: concept:d
+    status: accepted
+    derivation: asserted
+---
+# C
+""",
+        encoding="utf-8",
+    )
+    candidates = import_okf_candidates(bundle)
+    fm = next(c["frontmatter"] for c in candidates if c["concept_id"].endswith("C"))
+    assert fm["status"] == "candidate"
+    assert fm["relations"][0]["status"] == "candidate"
+    assert fm["relations"][0]["derivation"] == "imported"
+
+
+def test_relation_review_metadata_is_projected(vault: Path) -> None:
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    alpha.write_text(
+        """---
+id: entity:alpha
+type: Entity
+title: Alpha
+relations:
+  - predicate: related_to
+    target: entity:beta
+    extraction_confidence: 0.5
+    claim_confidence: 0.9
+    review_status: pending
+    created_by: agent:test
+    reviewed_by:
+      - user:kurt
+---
+# Alpha
+""",
+        encoding="utf-8",
+    )
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        row = idx.conn.execute(
+            "SELECT extraction_confidence,claim_confidence,review_status,created_by,reviewed_by_json "
+            "FROM relations WHERE source_id='entity:alpha' AND predicate='related_to'"
+        ).fetchone()
+        assert row["review_status"] == "pending"
+        assert row["created_by"] == "agent:test"
+        assert row["claim_confidence"] == 0.9
+        assert json.loads(row["reviewed_by_json"]) == ["user:kurt"]
