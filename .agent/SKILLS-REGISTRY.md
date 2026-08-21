@@ -12,12 +12,12 @@ All agents share a single canonical skill directory (`.agent/skills/`) via symli
 
 ---
 
-## Skill Inventory (template set, 36)
+## Skill Inventory (template set, 37)
 
 | Category | Skills |
 |:---|:---|
 | **Capture & Triage** | `universal-triager`, `write-note`, `clip-and-localize` |
-| **Vault Intelligence** | `query-vault`, `compile-wiki`, `extract-concepts`, `connect-domains`, `reconcile-vault`, `visualize-vault`, `graduate-idea` |
+| **Vault Intelligence** | `query-vault`, `compile-wiki`, `extract-concepts`, `connect-domains`, `reconcile-vault`, `visualize-vault`, `graduate-idea`, `knowledge-runtime` |
 | **Maintenance** | `optimize-workspace`, `archive-file`, `checkpoint-session`, `purge-desktop-ini`, `sync-agents`, `local-security-audit` |
 | **Validation** | `validate-frontmatter`, `validate-skills-standard`, `validate-workspace`, `validate-workflow-state` |
 | **Skill Development** | `skill-creator`, `review-skill-design`, `assimilate-skills` |
@@ -55,13 +55,28 @@ Start: "Process my inbox" / a new item lands in Inbox/
 ```
 Start: "What do my notes say about X?" / discovery work
 │
-├─ Question about your own notes        → query-vault
-├─ Compile sources into a wiki          → compile-wiki
-├─ Find recurring concepts/themes       → extract-concepts
-├─ Bridge two topics                    → connect-domains
-├─ Check for contradictions             → reconcile-vault
-├─ See vault topology                   → visualize-vault
-└─ Promote an idea to a project         → graduate-idea
+├─ Is the optional typed knowledge runtime available?
+│  ├─ Yes + typed entities/relations/claims needed → knowledge-runtime
+│  └─ No / ordinary note question                  → query-vault
+├─ Compile sources into a wiki                      → compile-wiki
+├─ Find recurring concepts/themes                   → extract-concepts
+├─ Bridge two topics                                → connect-domains
+├─ Check for contradictions                         → reconcile-vault
+├─ See vault topology                               → visualize-vault
+└─ Promote an idea to a project                     → graduate-idea
+```
+
+### Typed Knowledge Runtime
+
+```
+Need typed/entity-aware knowledge work
+│
+├─ Resolve/search/get        → knowledge.resolve_entity / search / get
+├─ Traverse graph            → knowledge.neighbors / trace_path / query
+├─ Inspect evidence/history  → knowledge.sources / claims / timeline
+├─ Reconcile/diagnose        → knowledge.contradictions / health / communities / impact
+└─ Mutate semantic state     → propose_patch → validate_patch → apply_patch
+                                (apply may be read-only / confirmation-gated)
 ```
 
 ### Maintenance Cycle
@@ -130,4 +145,4 @@ grep -rn "`Read`\|`Write`\|`Edit`\|`Bash`\|`Glob`\|`Grep`\|`AskUserQuestion`\|`W
 ---
 
 **Owner**: {{OWNER_NAME}}
-**Version**: 1.0 (Template release)
+**Version**: 1.1 (Knowledge runtime integration)

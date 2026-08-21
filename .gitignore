@@ -56,6 +56,8 @@ __pycache__/
 .pytest_cache/
 .ipynb_checkpoints/
 node_modules/
+# Disposable knowledge runtime projections (rebuild from Markdown/YAML)
+.agent/knowledge/generated/
 
 # ---------------------------------------------------------------------
 # Obsidian local state (keep config; drop volatile workspace + caches)

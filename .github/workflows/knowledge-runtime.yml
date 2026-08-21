@@ -1,0 +1,39 @@
+name: Knowledge runtime
+
+on:
+  pull_request:
+    paths:
+      - '.agent/knowledge/**'
+      - '.agent/skills/knowledge-runtime/**'
+      - '.github/workflows/knowledge-runtime.yml'
+      # Match the validator's scan scope: iter_markdown() walks every *.md in the
+      # vault, so any Markdown change anywhere must run whole-vault validation.
+      - '**/*.md'
+      - '*.md'
+  push:
+    paths:
+      - '.agent/knowledge/**'
+      - '.agent/skills/knowledge-runtime/**'
+      - '.github/workflows/knowledge-runtime.yml'
+      # Match the validator's scan scope: iter_markdown() walks every *.md in the
+      # vault, so any Markdown change anywhere must run whole-vault validation.
+      - '**/*.md'
+      - '*.md'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e './.agent/knowledge[test,linkml]'
+      - run: pytest -q .agent/knowledge/tests
+      - run: vault-knowledge --vault . validate
+      - run: vault-knowledge --vault . build --full
+      - run: vault-knowledge --vault . health
