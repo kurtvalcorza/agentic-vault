@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from .core import (
@@ -19,6 +20,25 @@ from .retrieval import fused_search
 from .runtime_index import RuntimeIndex
 from .transactions import apply_batch, validate_batch
 from .validation import validate_vault_semantics
+
+
+def _read_only() -> bool:
+    """Whether canonical writes are disabled.
+
+    Read at call time rather than import time so a test or embedding process can
+    change the environment without reloading the module. Same variable, default,
+    and truthiness rules as ``mcp_server`` — the guarantee is only meaningful if
+    every entry point honours it identically.
+    """
+    return os.environ.get("AGENTIC_VAULT_KNOWLEDGE_READ_ONLY", "1").lower() not in {"0", "false", "no"}
+
+
+def _refuse_write(command: str) -> int:
+    print(
+        f"error: '{command}' writes canonical Markdown and the knowledge runtime is "
+        "read-only.\nSet AGENTIC_VAULT_KNOWLEDGE_READ_ONLY=0 to enable writes.",
+    )
+    return 2
 
 
 def _root(value: str | None) -> Path:
@@ -125,6 +145,8 @@ def main() -> int:
             issues = validate_patch(proposal, root)
             print(json.dumps([item.__dict__ for item in issues], indent=2))
             return 1 if _has_errors(issues) else 0
+        if _read_only():
+            return _refuse_write("apply-patch")
         apply_patch(proposal, root)
         return 0
     if args.cmd in {"validate-batch", "apply-batch"}:
@@ -133,6 +155,8 @@ def main() -> int:
             issues = validate_batch(proposals, root)
             print(json.dumps(issues, indent=2))
             return 1 if _has_errors(issues) else 0
+        if _read_only():
+            return _refuse_write("apply-batch")
         print(json.dumps({"applied": apply_batch(proposals, root)}, indent=2))
         return 0
     if args.cmd == "export-okf":

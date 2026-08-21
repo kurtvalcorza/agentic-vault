@@ -170,7 +170,7 @@ Agents SHOULD NOT preload all steering files at session start. Read them when th
 11. **Obsidian CLI**: For vault-level operations (batch search, orphan detection, plugin management), use the `obsidian-cli` skill — not raw file-system tools.
 12. **Local Git Snapshots**: The vault root is a local git repo (notes + config scope). Commits run **automatically at session end** via `.agent/scripts/vault-git-commit.ps1`. Never commit secrets or nested repos. See **Version Control** below.
 13. **Audit Cadence**: Quarterly stack audit. On/after a quarter boundary (Mar 1 / Jun 1 / Sep 1 / Dec 1), check `System/AUDIT-LOG.md`; if there's no entry for the current quarter, prompt to run `optimize-workspace`. Pruning is human-gated — the audit proposes, the owner approves. See **Audit Cadence** below.
-14. **Knowledge Runtime**: Optional typed knowledge layer in `.agent/knowledge/`. If installed, prefer it over manual graph reconstruction; mutations are proposal-first. **The MCP write gate does not cover the CLI** — `apply-patch` / `apply-batch` write canonical Markdown either way. See **Knowledge Runtime & MCP** below.
+14. **Knowledge Runtime**: Optional typed knowledge layer in `.agent/knowledge/`. If installed, prefer it over manual graph reconstruction; mutations are proposal-first and **writes are off by default on every entry point** (MCP and CLI alike). Enabling them is an outward state change. See **Knowledge Runtime & MCP** below.
 
 ## Knowledge Runtime & MCP
 
@@ -191,7 +191,7 @@ Full detail: `.agent/knowledge/README.md`. The agent-facing contract is the `kno
 
 The runtime exposes 22 `knowledge_*` tools over stdio via `.agent/scripts/vault-knowledge-mcp.py`, which resolves the vault root from its own location. Wire it with `.mcp.json.example` — copy to `.mcp.json` (gitignored) and use **absolute paths**, since a client may spawn the server from any working directory. This is the narrow exception carved out in Operational Protocol 3: `.mcp.json` is machine-local, gitignored, and consumed by an external client that cannot resolve vault-relative paths. Config location and schema are harness-specific; see the table in `.agent/knowledge/README.md`.
 
-> **The write gate covers MCP only.** `knowledge_apply_patch` / `knowledge_apply_batch` raise unless `AGENTIC_VAULT_KNOWLEDGE_READ_ONLY=0`. **The CLI is not gated** — `vault-knowledge apply-patch` / `apply-batch` write canonical Markdown with no environment check. Either path is an **outward state change**: confirm with the owner before applying, and do not treat the MCP default as protection when running the CLI.
+> **Writes are off by default, on every entry point.** `AGENTIC_VAULT_KNOWLEDGE_READ_ONLY` defaults to on and is honoured identically by the MCP server and the CLI: `knowledge_apply_patch` / `knowledge_apply_batch` raise, and `vault-knowledge apply-patch` / `apply-batch` refuse with exit code 2, leaving the note untouched. Set `AGENTIC_VAULT_KNOWLEDGE_READ_ONLY=0` to enable writes. Doing so lets an agent edit canonical Markdown — treat it as an **outward state change** and confirm with the owner first, per Security & Privacy Protocols. `propose` and `validate-*` are unaffected; only `apply` is gated.
 
 ### Adding other MCP servers
 

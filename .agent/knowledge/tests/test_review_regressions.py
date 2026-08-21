@@ -1029,6 +1029,52 @@ def test_cli_propose_rejects_secret_target(vault: Path, monkeypatch: pytest.Monk
     assert "supersecret" not in captured.out
 
 
+def _write_proposal(vault: Path, tmp_path: Path) -> Path:
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    proposal = propose_frontmatter_patch(alpha, {"title": "Changed By CLI"})
+    proposal_file = tmp_path / "proposal.json"
+    proposal_file.write_text(json.dumps(proposal), encoding="utf-8")
+    return proposal_file
+
+
+def test_cli_apply_is_read_only_by_default(vault: Path, tmp_path: Path, monkeypatch, capsys) -> None:
+    """The write gate must cover every entry point, not just MCP.
+
+    A guarantee that holds for `knowledge_apply_patch` but not for
+    `vault-knowledge apply-patch` is worse than no guarantee: it invites setting
+    the MCP default and assuming the vault is protected.
+    """
+    proposal_file = _write_proposal(vault, tmp_path)
+    monkeypatch.delenv("AGENTIC_VAULT_KNOWLEDGE_READ_ONLY", raising=False)
+    monkeypatch.setattr(
+        sys, "argv", ["vault-knowledge", "--vault", str(vault), "apply-patch", str(proposal_file)]
+    )
+    assert cli.main() == 2
+    assert "AGENTIC_VAULT_KNOWLEDGE_READ_ONLY=0" in capsys.readouterr().out
+    # ...and the note on disk is untouched.
+    assert "Changed By CLI" not in (vault / "02_Areas/Synthetic/Alpha.md").read_text(encoding="utf-8")
+
+
+def test_cli_apply_writes_when_explicitly_enabled(vault: Path, tmp_path: Path, monkeypatch) -> None:
+    proposal_file = _write_proposal(vault, tmp_path)
+    monkeypatch.setenv("AGENTIC_VAULT_KNOWLEDGE_READ_ONLY", "0")
+    monkeypatch.setattr(
+        sys, "argv", ["vault-knowledge", "--vault", str(vault), "apply-patch", str(proposal_file)]
+    )
+    assert cli.main() == 0
+    assert "Changed By CLI" in (vault / "02_Areas/Synthetic/Alpha.md").read_text(encoding="utf-8")
+
+
+def test_cli_validate_still_works_while_read_only(vault: Path, tmp_path: Path, monkeypatch) -> None:
+    """Read-only must not disable the validation half of propose -> validate -> apply."""
+    proposal_file = _write_proposal(vault, tmp_path)
+    monkeypatch.delenv("AGENTIC_VAULT_KNOWLEDGE_READ_ONLY", raising=False)
+    monkeypatch.setattr(
+        sys, "argv", ["vault-knowledge", "--vault", str(vault), "validate-patch", str(proposal_file)]
+    )
+    assert cli.main() == 0
+
+
 def test_neighbors_include_derived_keeps_accepted_filter(vault: Path) -> None:
     (vault / "02_Areas/Synthetic/Gamma.md").write_text(
         "---\nid: entity:gamma\ntype: Entity\ntitle: Gamma\n---\n# Gamma\n", encoding="utf-8"
