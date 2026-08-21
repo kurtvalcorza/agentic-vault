@@ -20,7 +20,7 @@ Intake rules and the **Source Catalog** for `03_Resources/` — external referen
 
 ## Summary Statistics
 
-- **Catalog Entries (total):** 1
+- **Catalog Entries (total):** 2
 
 ## Source Catalog
 
