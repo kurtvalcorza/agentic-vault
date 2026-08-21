@@ -286,11 +286,19 @@ def iter_markdown(vault_root: Path) -> Iterator[Path]:
         resolved = path.resolve()
         if resolved != root and root not in resolved.parents:
             continue
-        if any(part in excluded for part in rel.parts):
+        # Apply every exclusion against BOTH the lexical and the resolved path so
+        # an in-vault symlink cannot smuggle in content from an excluded or
+        # `.knowledge-ignore` tree (or the runtime's own generated projection).
+        rels = [rel]
+        try:
+            rels.append(resolved.relative_to(root))
+        except ValueError:
+            pass
+        if any(part in excluded for r in rels for part in r.parts):
             continue
-        if runtime_generated == rel or runtime_generated in rel.parents:
+        if any(runtime_generated == r or runtime_generated in r.parents for r in rels):
             continue
-        if _has_knowledge_ignore(path, root):
+        if _has_knowledge_ignore(path, root) or _has_knowledge_ignore(resolved, root):
             continue
         yield path
 

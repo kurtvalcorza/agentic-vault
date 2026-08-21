@@ -105,7 +105,34 @@ class ExtendedKnowledgeIndex(KnowledgeIndex):
 
         if changed:
             self._project_claims()
+            self._repoint_merged_relations()
         return issues
+
+    def _repoint_merged_relations(self) -> None:
+        """Repoint relation endpoints that reference a merged object to its
+        canonical redirect target, so neighbors()/trace()/analytics keep the edge
+        attached to the surviving node instead of the obsolete id."""
+        redirects: dict[str, str] = {}
+        for row in self.conn.execute("SELECT id,frontmatter_json FROM objects WHERE status='merged'"):
+            target = json.loads(row["frontmatter_json"]).get("redirect_to")
+            if target:
+                redirects[row["id"]] = str(target)
+        if not redirects:
+            return
+
+        def _final(oid: str) -> str:
+            seen: set[str] = set()
+            while oid in redirects and oid not in seen:
+                seen.add(oid)
+                oid = redirects[oid]
+            return oid
+
+        for old in redirects:
+            dest = _final(old)
+            if dest != old:
+                self.conn.execute("UPDATE relations SET source_id=? WHERE source_id=?", (dest, old))
+                self.conn.execute("UPDATE relations SET target_id=? WHERE target_id=?", (dest, old))
+        self.conn.commit()
 
     def _project_claims(self) -> None:
         self.conn.execute("DELETE FROM claim_evidence")
@@ -240,8 +267,11 @@ class ExtendedKnowledgeIndex(KnowledgeIndex):
         out: list[dict[str, Any]] = []
         for i, a in enumerate(rows):
             for b in rows[i + 1:]:
+                # Rows are ordered by (subject_id, predicate, id); once either
+                # differs the group is over, so break instead of scanning the
+                # rest (keeps contradiction detection linear per group).
                 if a["subject_id"] != b["subject_id"] or a["predicate"] != b["predicate"]:
-                    continue
+                    break
                 if a["object_value"] == b["object_value"]:
                     continue
                 if _interval_overlaps(a["valid_from"], a["valid_to"], b["valid_from"], b["valid_to"]):

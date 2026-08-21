@@ -134,6 +134,14 @@ def export_okf_bundle(vault_root: Path, output_dir: Path) -> dict[str, Any]:
         )
 
         if destination.exists():
+            # Re-verify ownership immediately before the destructive rmtree: a
+            # concurrent process (cloud sync, another export) could have replaced
+            # the owned bundle with unrelated data since the initial check.
+            manifest = destination / BUNDLE_MARKER
+            if not (manifest.is_file() and manifest.read_text(encoding="utf-8").startswith(BUNDLE_SENTINEL)):
+                raise ValueError(
+                    f"refusing to replace {destination}: ownership manifest changed during export"
+                )
             shutil.rmtree(destination)
         os.replace(staging, destination)
         staging = None
@@ -145,6 +153,9 @@ def export_okf_bundle(vault_root: Path, output_dir: Path) -> dict[str, Any]:
 
 def validate_okf_bundle(bundle_root: Path) -> list[dict[str, str]]:
     issues: list[dict[str, str]] = []
+    if not bundle_root.is_dir():
+        return [{"path": str(bundle_root), "code": "missing-bundle",
+                 "message": "OKF bundle path does not exist or is not a directory"}]
     for path in bundle_root.rglob("*.md"):
         rel = path.relative_to(bundle_root)
         if path.name.lower() in RESERVED:
@@ -212,7 +223,12 @@ SENSITIVE_OUTPUT_NAMES = {
 def _reject_unsafe_export_output(output: Path, allowed_suffixes: set[str]) -> None:
     """Graph exports must never overwrite canonical notes, protected config,
     secret files, or any existing file that is not itself an export artifact."""
-    if _protected_violation(output):
+    # A symlink output would let write_text() follow the link and overwrite its
+    # target (e.g. a link to .env). Reject symlinks and run the path checks
+    # against the resolved location, not just the lexical one.
+    if output.is_symlink():
+        raise ValueError(f"refusing to write a graph export through a symlink: {output}")
+    if _protected_violation(output) or _protected_violation(output.resolve()):
         raise ValueError(f"refusing to write a graph export into a protected workspace: {output}")
     if output.suffix.lower() == ".md":
         raise ValueError(f"refusing to write a graph export over a Markdown path: {output}")

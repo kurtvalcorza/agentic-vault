@@ -81,5 +81,15 @@ Changes are generic, synthetic, and agent-agnostic. Markdown/YAML remains author
 - Fused retrieval discards adapter hits that don't resolve to a canonical object and sources titles from the index.
 - Added regression tests for each.
 
+## Eighth pass (head 2681a65 review)
+- OKF export re-verifies the ownership manifest immediately before `rmtree` (guards a concurrent replacement between the initial check and deletion).
+- Graph exports reject symlink output paths and check the resolved location (a link to `.env` can no longer be followed).
+- Contradiction detection breaks at the sorted (subject, predicate) group boundary — linear per group instead of quadratic.
+- Notes declaring `knowledge_schema` but missing id/type are flagged (`incomplete-semantic`) instead of silently skipped.
+- `iter_markdown` applies exclusion/`.knowledge-ignore` checks against the resolved path, so an in-vault symlink into an ignored/generated tree is skipped.
+- Graph edges to a merged object are repointed to its redirect target at projection time, keeping `neighbors`/`trace`/analytics connected to the surviving node.
+- `validate-okf` on a nonexistent bundle path reports `missing-bundle` instead of a false empty success.
+- Added regression tests for each.
+
 ## Status
 Review fixes implemented on `feat/knowledge-runtime-rfc-2`; PR #3 remains the review surface. Full local pytest (excluding the LinkML-dependency test, which CI runs) is green; `validate` / `build --full` / `health` on the public vault report zero issues.

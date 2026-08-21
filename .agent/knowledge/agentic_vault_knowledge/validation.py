@@ -208,6 +208,13 @@ def scan_vault_semantics(
         base = validate_note(note, registry)
         issues.extend(i for i in base if i.code != "unknown-relation")
         if not note.semantic:
+            # A note that declares the runtime schema is intended to be a semantic
+            # object; missing id/type must be reported, not silently skipped.
+            if note.frontmatter.get("knowledge_schema") is not None:
+                issues.append(ValidationIssue(
+                    p, "incomplete-semantic",
+                    "note declares knowledge_schema but is missing id and/or type",
+                ))
             continue
         oid = note.object_id or ""
         if oid in ids:

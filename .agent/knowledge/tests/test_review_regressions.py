@@ -17,11 +17,13 @@ from agentic_vault_knowledge.core import (
     split_frontmatter,
     validate_patch,
 )
+from agentic_vault_knowledge import interop
 from agentic_vault_knowledge.interop import (
     export_jsonld,
     export_okf_bundle,
     export_rdf_ntriples,
     import_okf_candidates,
+    validate_okf_bundle,
 )
 from agentic_vault_knowledge.proposals import propose_entity
 from agentic_vault_knowledge.runtime_index import EXPECTED_CLAIM_COLUMNS, RuntimeIndex
@@ -1174,3 +1176,151 @@ def test_fused_search_discards_stale_adapter_hits(vault: Path) -> None:
         assert idx.build(vault, _schema(vault)) == []
         results = fused_search(idx, "sample", adapters=[StaleAdapter()], graph_expand=False)
         assert "entity:ghost" not in {r["id"] for r in results}
+
+
+# --- Eighth review pass (head 2681a65) regression coverage ---
+
+
+def test_okf_export_rechecks_ownership_before_rmtree(vault: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    out = vault / ".agent/outputs/okf"
+    export_okf_bundle(vault, out)  # first export creates an owned bundle
+    real_parse = interop.parse_note
+
+    def racing_parse(path, root=None):
+        # Simulate a concurrent process replacing the owned bundle mid-export.
+        (out / ".okf-bundle").write_text("not-ours\n", encoding="utf-8")
+        return real_parse(path, root)
+
+    monkeypatch.setattr(interop, "parse_note", racing_parse)
+    with pytest.raises(ValueError, match="ownership manifest changed"):
+        export_okf_bundle(vault, out)
+
+
+def test_graph_export_refuses_symlink_output(vault: Path) -> None:
+    import os
+
+    (vault / ".env").write_text("SECRET=supersecret\n", encoding="utf-8")
+    link = vault / ".agent/outputs/knowledge.jsonld"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.symlink(vault / ".env", link)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported here")
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        with pytest.raises(ValueError, match="symlink"):
+            export_jsonld(idx, link)
+    assert "supersecret" in (vault / ".env").read_text(encoding="utf-8")
+
+
+def test_contradictions_across_multiple_subject_groups(vault: Path) -> None:
+    for oid in ("entity:gamma", "entity:delta"):
+        (vault / f"02_Areas/Synthetic/{oid.split(':')[1]}.md").write_text(
+            f"---\nid: {oid}\ntype: Entity\ntitle: {oid}\n---\n# {oid}\n", encoding="utf-8"
+        )
+    (vault / "02_Areas/Synthetic/Alpha.md").write_text(
+        """---
+id: entity:alpha
+type: Entity
+title: Alpha
+claims:
+  - id: claim:a1
+    predicate: related_to
+    object: entity:beta
+    status: accepted
+    valid_from: 2026-01-01
+  - id: claim:a2
+    predicate: related_to
+    object: entity:gamma
+    status: accepted
+    valid_from: 2026-01-01
+---
+# Alpha
+""",
+        encoding="utf-8",
+    )
+    (vault / "02_Areas/Synthetic/Beta.md").write_text(
+        """---
+id: entity:beta
+type: Entity
+title: Beta
+claims:
+  - id: claim:b1
+    predicate: related_to
+    object: entity:gamma
+    status: accepted
+    valid_from: 2026-01-01
+  - id: claim:b2
+    predicate: related_to
+    object: entity:delta
+    status: accepted
+    valid_from: 2026-01-01
+---
+# Beta
+""",
+        encoding="utf-8",
+    )
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        subjects = {c["subject_id"] for c in idx.contradiction_candidates() if c.get("subject_id")}
+        assert {"entity:alpha", "entity:beta"} <= subjects  # both groups detected past the break
+
+
+def test_knowledge_schema_without_id_is_flagged(vault: Path) -> None:
+    note = vault / "02_Areas/Synthetic/Partial.md"
+    note.write_text("---\nknowledge_schema: '0.1.0'\ntype: Entity\ntitle: Partial\n---\n# P\n", encoding="utf-8")
+    issues = validate_vault_semantics(vault, _schema(vault))
+    assert "incomplete-semantic" in {item.code for item in issues}
+
+
+def test_symlink_into_ignored_tree_is_skipped(vault: Path) -> None:
+    import os
+
+    ignored = vault / "02_Areas/Ignored"
+    ignored.mkdir(parents=True)
+    (ignored / ".knowledge-ignore").write_text("x", encoding="utf-8")
+    real = ignored / "Hidden.md"
+    real.write_text("---\nid: entity:hidden\ntype: Entity\ntitle: Hidden\n---\n# H\n", encoding="utf-8")
+    link = vault / "02_Areas/Synthetic/Visible.md"
+    try:
+        os.symlink(real, link)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported here")
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        assert idx.get("entity:hidden") is None
+
+
+def test_merged_redirect_repoints_graph_edges(vault: Path) -> None:
+    (vault / "02_Areas/Synthetic/New.md").write_text(
+        "---\nid: entity:new\ntype: Entity\ntitle: New\n---\n# New\n", encoding="utf-8"
+    )
+    (vault / "02_Areas/Synthetic/Old.md").write_text(
+        "---\nid: entity:old\ntype: Entity\ntitle: Old\nstatus: merged\nredirect_to: entity:new\n---\n# Old\n",
+        encoding="utf-8",
+    )
+    (vault / "02_Areas/Synthetic/Alpha.md").write_text(
+        """---
+id: entity:alpha
+type: Entity
+title: Alpha
+relations:
+  - predicate: related_to
+    target: entity:old
+---
+# Alpha
+""",
+        encoding="utf-8",
+    )
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        endpoints = set()
+        for edge in idx.neighbors("entity:new"):
+            endpoints.add(edge["source_id"])
+            endpoints.add(edge["target_id"])
+        assert "entity:alpha" in endpoints  # edge repointed from merged old id to new
+
+
+def test_validate_okf_rejects_missing_bundle(tmp_path: Path) -> None:
+    issues = validate_okf_bundle(tmp_path / "does-not-exist")
+    assert issues and issues[0]["code"] == "missing-bundle"
