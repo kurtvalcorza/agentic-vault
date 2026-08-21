@@ -280,6 +280,12 @@ def iter_markdown(vault_root: Path) -> Iterator[Path]:
             rel = path.relative_to(root)
         except ValueError:
             continue
+        # A symlink whose target escapes the vault must not be read as canonical:
+        # rglob yields the link and lexical relative_to succeeds, so verify the
+        # resolved target still lives under the resolved root.
+        resolved = path.resolve()
+        if resolved != root and root not in resolved.parents:
+            continue
         if any(part in excluded for part in rel.parts):
             continue
         if runtime_generated == rel or runtime_generated in rel.parents:
@@ -511,7 +517,7 @@ class KnowledgeIndex:
     def search(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         try:
             rows = self.conn.execute(
-                "SELECT id,title,snippet(objects_fts,2,'[',']',' … ',12) AS snippet FROM objects_fts WHERE objects_fts MATCH ? LIMIT ?",
+                "SELECT id,title,snippet(objects_fts,2,'[',']',' … ',12) AS snippet FROM objects_fts WHERE objects_fts MATCH ? ORDER BY rank LIMIT ?",
                 (query, limit),
             ).fetchall()
         except sqlite3.OperationalError:
@@ -649,9 +655,13 @@ def _resolve_vault_path(raw_path: str | Path, vault_root: Path) -> Path:
 # Directories the mutation API must never write into: version control, per-agent
 # configuration workspaces, and scan-excluded / generated locations. Canonical
 # knowledge lives in Markdown notes, never in these.
+# Directory names that are never canonical vault content. "generated"/"export"
+# are intentionally NOT here: a real PARA folder may use those names and
+# iter_markdown scans them; the runtime's own tree lives under .agent, and
+# export bundles are excluded via .knowledge-ignore markers instead.
 PROTECTED_TARGET_DIRNAMES = {
     ".agent", ".git", ".claude", ".gemini", ".kiro", ".codex", ".obsidian",
-    ".venv", "node_modules", "__pycache__", "generated",
+    ".venv", "node_modules", "__pycache__",
 }
 
 
@@ -662,6 +672,8 @@ def _reject_unwritable_target(path: Path, vault_root: Path) -> None:
     rel = path.resolve().relative_to(vault_root.resolve())
     if any(part in PROTECTED_TARGET_DIRNAMES for part in rel.parts):
         raise KnowledgeError(f"patch target is inside a protected workspace: {path}")
+    if _has_knowledge_ignore(path, vault_root):
+        raise KnowledgeError(f"patch target is inside a scan-excluded (.knowledge-ignore) tree: {path}")
 
 
 def propose_frontmatter_patch(path: Path, patch: dict[str, Any]) -> dict[str, Any]:

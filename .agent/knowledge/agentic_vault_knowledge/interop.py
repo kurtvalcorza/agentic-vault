@@ -201,16 +201,29 @@ def _demote_imported_frontmatter(fm: dict[str, Any]) -> dict[str, Any]:
     return demoted
 
 
-def _reject_markdown_output(output: Path) -> None:
-    """Graph exports must never overwrite canonical notes or protected config."""
-    if output.suffix.lower() == ".md":
-        raise ValueError(f"refusing to write a graph export over a Markdown path: {output}")
+# Root-level configuration / secret files a graph export must never overwrite,
+# even though they are neither Markdown nor inside a protected directory.
+SENSITIVE_OUTPUT_NAMES = {
+    ".env", "mcp.json", ".gitignore", ".gitattributes", "desktop.ini", ".npmrc",
+    "package.json", "pyproject.toml", "setup.cfg",
+}
+
+
+def _reject_unsafe_export_output(output: Path, allowed_suffixes: set[str]) -> None:
+    """Graph exports must never overwrite canonical notes, protected config,
+    secret files, or any existing file that is not itself an export artifact."""
     if _protected_violation(output):
         raise ValueError(f"refusing to write a graph export into a protected workspace: {output}")
+    if output.suffix.lower() == ".md":
+        raise ValueError(f"refusing to write a graph export over a Markdown path: {output}")
+    if output.name in SENSITIVE_OUTPUT_NAMES:
+        raise ValueError(f"refusing to write a graph export over a configuration/secret file: {output}")
+    if output.exists() and output.suffix.lower() not in allowed_suffixes:
+        raise ValueError(f"refusing to overwrite an existing non-export file: {output}")
 
 
 def export_jsonld(index, output: Path) -> dict[str, Any]:
-    _reject_markdown_output(output)
+    _reject_unsafe_export_output(output, {".json", ".jsonld"})
     graph = []
     for row in index.conn.execute("SELECT id,type,title,status FROM objects ORDER BY id"):
         node = {"@id": row["id"], "@type": row["type"], "name": row["title"], "status": row["status"]}
@@ -242,7 +255,7 @@ def _literal(value: str) -> str:
 
 
 def export_rdf_ntriples(index, output: Path) -> dict[str, Any]:
-    _reject_markdown_output(output)
+    _reject_unsafe_export_output(output, {".nt", ".ntriples"})
     rdf_type = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>"
     rdfs_label = "<http://www.w3.org/2000/01/rdf-schema#label>"
     av_status = _urn("property", "status")

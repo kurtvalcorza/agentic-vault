@@ -71,5 +71,15 @@ Changes are generic, synthetic, and agent-agnostic. Markdown/YAML remains author
 - Duplicate YAML frontmatter keys are rejected (`duplicate frontmatter key`) instead of silently collapsing to the last value.
 - Added regression tests for each (CI-config and the MCP response-path one covered by the code change).
 
+## Seventh pass (head 2bec376 review)
+- Graph exports refuse root secret/config files (`.env`, `mcp.json`, `.gitignore`, …) and refuse overwriting any existing non-export file, not just Markdown/protected dirs.
+- Symlinked Markdown whose resolved target escapes the vault root is skipped by `iter_markdown` (no reading external content as canonical).
+- `propose_relation` defaults missing status to `proposed` (matches `propose_claim`); no silent promotion into the assertion graph.
+- Patch API rejects targets under a `.knowledge-ignore` tree, and no longer treats a generic PARA `generated/` folder as protected (only `.agent`/config/VCS trees are).
+- CLI `propose` output serializes YAML date/datetime values (`default=str`).
+- FTS `search` orders by relevance (`ORDER BY rank`) before applying `LIMIT`.
+- Fused retrieval discards adapter hits that don't resolve to a canonical object and sources titles from the index.
+- Added regression tests for each.
+
 ## Status
 Review fixes implemented on `feat/knowledge-runtime-rfc-2`; PR #3 remains the review surface. Full local pytest (excluding the LinkML-dependency test, which CI runs) is green; `validate` / `build --full` / `health` on the public vault report zero issues.

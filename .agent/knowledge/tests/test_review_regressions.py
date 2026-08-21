@@ -1071,3 +1071,106 @@ def test_apply_patch_preserves_file_mode(vault: Path) -> None:
 def test_duplicate_frontmatter_keys_rejected() -> None:
     with pytest.raises(KnowledgeError, match="duplicate frontmatter key"):
         split_frontmatter("---\nid: x:y\nid: x:z\ntype: Entity\ntitle: Dup\n---\n# Dup\n")
+
+
+# --- Seventh review pass (head 2bec376) regression coverage ---
+
+
+def test_graph_export_refuses_root_secret_files(vault: Path) -> None:
+    (vault / ".env").write_text("SECRET=supersecret\n", encoding="utf-8")
+    (vault / "mcp.json").write_text("{}\n", encoding="utf-8")
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        with pytest.raises(ValueError):
+            export_jsonld(idx, vault / ".env")
+        with pytest.raises(ValueError):
+            export_rdf_ntriples(idx, vault / "mcp.json")
+    assert "supersecret" in (vault / ".env").read_text(encoding="utf-8")
+
+
+def test_propose_relation_defaults_to_proposed(vault: Path) -> None:
+    from agentic_vault_knowledge.proposals import propose_relation
+
+    proposal = propose_relation(vault, "02_Areas/Synthetic/Alpha.md", {
+        "predicate": "related_to", "target": "entity:beta",
+    })
+    assert proposal["frontmatter"]["relations"][-1]["status"] == "proposed"
+
+
+def test_patch_rejects_target_under_knowledge_ignore(vault: Path) -> None:
+    ignored = vault / "02_Areas/Ignored"
+    ignored.mkdir(parents=True)
+    (ignored / ".knowledge-ignore").write_text("x", encoding="utf-8")
+    target = ignored / "Note.md"
+    target.write_text("---\nid: entity:ign\ntype: Entity\ntitle: I\n---\n# I\n", encoding="utf-8")
+    proposal = propose_frontmatter_patch(target, {"title": "Z"})
+    with pytest.raises(KnowledgeError, match="knowledge-ignore"):
+        apply_patch(proposal, vault)
+
+
+def test_patch_allowed_in_generic_generated_folder(vault: Path) -> None:
+    note = vault / "01_Projects/report/generated/Summary.md"
+    note.parent.mkdir(parents=True)
+    note.write_text("---\nid: entity:sum\ntype: Entity\ntitle: Summary\n---\n# S\n", encoding="utf-8")
+    proposal = propose_frontmatter_patch(note, {"title": "Summary Two"})
+    apply_patch(proposal, vault)  # must not raise: a real PARA 'generated' folder is canonical
+    assert "Summary Two" in note.read_text(encoding="utf-8")
+
+
+def test_symlinked_note_escaping_vault_is_skipped(vault: Path, tmp_path: Path) -> None:
+    import os
+
+    external = tmp_path.parent / "external_note_escape.md"
+    external.write_text("---\nid: entity:external\ntype: Entity\ntitle: External\n---\n# X\n", encoding="utf-8")
+    link = vault / "02_Areas/Synthetic/Link.md"
+    try:
+        os.symlink(external, link)
+    except (OSError, NotImplementedError):
+        import pytest as _pytest
+        _pytest.skip("symlinks not supported here")
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        assert idx.get("entity:external") is None
+
+
+def test_cli_propose_serializes_date_values(vault: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    alpha.write_text(
+        "---\nid: entity:alpha\ntype: Entity\ntitle: Alpha\ncreated: 2026-08-21\n---\n# Alpha\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys, "argv",
+        ["vault-knowledge", "--vault", str(vault), "propose", "02_Areas/Synthetic/Alpha.md", '{"title": "New"}'],
+    )
+    assert cli.main() == 0
+    assert "2026-08-21" in capsys.readouterr().out
+
+
+def test_search_orders_by_relevance(vault: Path) -> None:
+    (vault / "02_Areas/Synthetic/Buried.md").write_text(
+        "---\nid: entity:buried\ntype: Entity\ntitle: Buried\n---\n# Buried\n" + ("filler " * 200) + "zeta\n",
+        encoding="utf-8",
+    )
+    (vault / "02_Areas/Synthetic/Titled.md").write_text(
+        "---\nid: entity:titled\ntype: Entity\ntitle: Zeta\n---\n# Zeta\n", encoding="utf-8"
+    )
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        top = idx.search("zeta", limit=1)
+        assert top and top[0]["id"] == "entity:titled"
+
+
+def test_fused_search_discards_stale_adapter_hits(vault: Path) -> None:
+    from agentic_vault_knowledge.retrieval import fused_search
+
+    class StaleAdapter:
+        name = "stale"
+
+        def search(self, query: str, limit: int = 20):
+            return [{"id": "entity:ghost", "score": 99.0, "title": "Ghost"}]
+
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        results = fused_search(idx, "sample", adapters=[StaleAdapter()], graph_expand=False)
+        assert "entity:ghost" not in {r["id"] for r in results}

@@ -46,7 +46,13 @@ def fused_search(index, query: str, limit: int = 20, adapters: list[RetrievalAda
                 merged[oid]["score"] += score
                 merged[oid]["retrieval_sources"].append(adapter.name)
             else:
-                merged[oid] = {**row, "id": oid, "score": score, "retrieval_sources": [adapter.name]}
+                # An optional backend can be stale after a rename/delete. Only
+                # surface adapter hits that still resolve to a canonical object,
+                # and take the title from the index rather than the adapter.
+                obj = index.get(oid)
+                if not obj:
+                    continue
+                merged[oid] = {"id": oid, "title": obj["title"], "score": score, "retrieval_sources": [adapter.name]}
 
     if graph_expand:
         seeds = list(merged.values())[: min(5, len(merged))]

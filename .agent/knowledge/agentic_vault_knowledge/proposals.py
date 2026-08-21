@@ -43,7 +43,11 @@ def propose_relation(vault_root: Path, relative_path: str, relation: dict[str, A
     path = _safe_target(vault_root, relative_path)
     fm, _ = _read_frontmatter(path)
     relations = list(fm.get("relations") or [])
-    relations.append(dict(relation))
+    candidate = dict(relation)
+    # A proposal constructor never silently promotes machine/user-supplied input
+    # into the accepted assertion graph (mirrors propose_claim()).
+    candidate.setdefault("status", "proposed")
+    relations.append(candidate)
     proposal = propose_frontmatter_patch(path, {"relations": relations})
     proposal["operation"] = "update"
     return proposal

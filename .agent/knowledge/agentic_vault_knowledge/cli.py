@@ -113,7 +113,9 @@ def main() -> int:
         except KnowledgeError as exc:
             raise SystemExit(str(exc))
         proposal = propose_frontmatter_patch(path, json.loads(args.patch_json))
-        print(json.dumps(proposal, indent=2))
+        # default=str: frontmatter may carry YAML date/datetime values that are
+        # not natively JSON-serializable.
+        print(json.dumps(proposal, indent=2, default=str))
         return 0
     if args.cmd in {"validate-patch", "apply-patch"}:
         proposal = json.loads(Path(args.proposal).read_text(encoding="utf-8"))
