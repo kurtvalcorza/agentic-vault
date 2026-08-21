@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sqlite3
+import stat
 import tempfile
 from collections import deque
 from pathlib import Path
@@ -99,6 +100,26 @@ class SemanticEnricher(Protocol):
     def extract_candidates(self, note: ParsedNote) -> list[dict[str, Any]]: ...
 
 
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """SafeLoader that rejects duplicate mapping keys instead of silently
+    keeping the last occurrence (which would drop authored id/status/claims)."""
+
+
+def _construct_mapping_no_dupes(loader: _UniqueKeyLoader, node: yaml.MappingNode) -> dict:
+    mapping: dict = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=True)
+        if key in mapping:
+            raise KnowledgeError(f"duplicate frontmatter key: {key!r}")
+        mapping[key] = loader.construct_object(value_node, deep=True)
+    return mapping
+
+
+_UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping_no_dupes
+)
+
+
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -118,7 +139,7 @@ def split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
         body = ""
     else:
         return {}, normalized
-    data = yaml.safe_load(raw) or {}
+    data = yaml.load(raw, Loader=_UniqueKeyLoader) or {}
     if not isinstance(data, dict):
         raise KnowledgeError("YAML frontmatter must be a mapping")
     return data, body
@@ -502,13 +523,15 @@ class KnowledgeIndex:
         return [dict(r) for r in rows]
 
     def neighbors(self, object_id: str, predicate: str | None = None, include_derived: bool = False) -> list[dict[str, Any]]:
-        sql = "SELECT * FROM relations WHERE (source_id=? OR target_id=?)"
+        # status='accepted' is unconditional (retracted/candidate edges are never
+        # current neighbors); include_derived toggles only the inferred filter.
+        sql = "SELECT * FROM relations WHERE status='accepted' AND (source_id=? OR target_id=?)"
         args: list[Any] = [object_id, object_id]
         if predicate:
             sql += " AND predicate=?"
             args.append(predicate)
         if not include_derived:
-            sql += " AND status='accepted' AND derivation!='inferred'"
+            sql += " AND derivation!='inferred'"
         return [dict(r) for r in self.conn.execute(sql, args)]
 
     def trace(self, start: str, end: str, max_depth: int = 6, include_derived: bool = False) -> list[str]:
@@ -736,12 +759,29 @@ def apply_patch(proposal: dict[str, Any], vault_root: Path) -> None:
             raise ConflictError(f"source removed during validation: {path}")
         if sha256_text(path.read_text(encoding="utf-8")) != proposal["base_hash"]:
             raise ConflictError(f"source changed during validation: {path}")
+    _atomic_write_preserving_mode(path, str(proposal["content"]), creating)
+
+
+def _default_file_mode() -> int:
+    current = os.umask(0)
+    os.umask(current)
+    return 0o666 & ~current
+
+
+def _atomic_write_preserving_mode(path: Path, content: str, creating: bool) -> None:
+    """Atomically write `content` to `path`, preserving the existing file's
+    permissions on update (mkstemp defaults to 0600, which would otherwise make
+    a normal 0644 note unreadable to other users)."""
+    mode = None
+    if not creating and path.exists():
+        mode = stat.S_IMODE(path.stat().st_mode)
     fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
-            fh.write(str(proposal["content"]))
+            fh.write(content)
             fh.flush()
             os.fsync(fh.fileno())
+        os.chmod(tmp, mode if mode is not None else _default_file_mode())
         os.replace(tmp, path)
     finally:
         with contextlib.suppress(FileNotFoundError):

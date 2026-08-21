@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import stat
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 from .core import (
     ConflictError,
     KnowledgeError,
+    _default_file_mode,
     _identity_guard_issues,
     _is_create,
     _reject_unwritable_target,
@@ -119,6 +121,7 @@ def apply_batch(proposals: list[dict[str, Any]], vault_root: Path) -> list[str]:
 
     staged: dict[Path, Path] = {}
     backups: dict[Path, bytes] = {}
+    modes: dict[Path, int] = {}
     created: set[Path] = set()
     replaced: list[Path] = []
     try:
@@ -127,13 +130,16 @@ def apply_batch(proposals: list[dict[str, Any]], vault_root: Path) -> list[str]:
             if _is_create(proposal):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 created.add(path)
+                modes[path] = _default_file_mode()
             else:
                 backups[path] = path.read_bytes()
+                modes[path] = stat.S_IMODE(path.stat().st_mode)
             fd, tmp = tempfile.mkstemp(prefix=path.name + ".knowledge-stage.", dir=str(path.parent))
             with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
                 handle.write(str(proposal["content"]))
                 handle.flush()
                 os.fsync(handle.fileno())
+            os.chmod(tmp, modes[path])
             staged[path] = Path(tmp)
         # Post-validation, pre-commit recheck: validate_batch scanned the whole
         # vault, which can race a concurrent edit or a newly-created target. Verify
@@ -164,6 +170,7 @@ def apply_batch(proposals: list[dict[str, Any]], vault_root: Path) -> list[str]:
                     handle.write(backups[path])
                     handle.flush()
                     os.fsync(handle.fileno())
+                os.chmod(tmp, modes.get(path, _default_file_mode()))
                 os.replace(tmp, path)
         raise
     finally:

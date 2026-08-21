@@ -4,7 +4,15 @@ import argparse
 import json
 from pathlib import Path
 
-from .core import apply_patch, propose_frontmatter_patch, validate_patch, vault_roots
+from .core import (
+    KnowledgeError,
+    _reject_unwritable_target,
+    _resolve_vault_path,
+    apply_patch,
+    propose_frontmatter_patch,
+    validate_patch,
+    vault_roots,
+)
 from .interop import export_jsonld, export_okf_bundle, export_rdf_ntriples, import_okf_candidates, validate_okf_bundle
 from .migrations import plan_migrations, schema_version
 from .retrieval import fused_search
@@ -96,9 +104,14 @@ def main() -> int:
         print(json.dumps([item.__dict__ for item in issues], indent=2))
         return 1 if _has_errors(issues) else 0
     if args.cmd == "propose":
-        path = (root / args.path).resolve()
-        if path == root or root not in path.parents:
-            raise SystemExit("path escapes vault root")
+        # Guard the target BEFORE reading it: propose_frontmatter_patch reads the
+        # whole file into the proposal, so a secret-bearing or protected target
+        # (.env, mcp.json, .git/...) must be rejected before any read.
+        try:
+            path = _resolve_vault_path(args.path, root)
+            _reject_unwritable_target(path, root)
+        except KnowledgeError as exc:
+            raise SystemExit(str(exc))
         proposal = propose_frontmatter_patch(path, json.loads(args.patch_json))
         print(json.dumps(proposal, indent=2))
         return 0

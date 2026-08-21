@@ -9,7 +9,7 @@ from typing import Any, Callable, TypeVar
 
 from mcp.server import MCPServer
 
-from agentic_vault_knowledge.core import KnowledgeError, apply_patch, propose_frontmatter_patch, validate_patch, vault_roots
+from agentic_vault_knowledge.core import KnowledgeError, _resolve_vault_path, apply_patch, propose_frontmatter_patch, validate_patch, vault_roots
 from agentic_vault_knowledge.retrieval import fused_search
 from agentic_vault_knowledge.runtime_index import RuntimeIndex
 from agentic_vault_knowledge.transactions import apply_batch, validate_batch
@@ -184,8 +184,10 @@ def knowledge_apply_patch(proposal_json: str) -> dict[str, Any]:
     # refresh and serve a partially-applied state.
     with _INDEX_LOCK:
         apply_patch(proposal, VAULT_ROOT)
-    path = Path(proposal["path"]).resolve()
-    return {"applied": True, "path": str(path.relative_to(VAULT_ROOT))}
+    # Resolve against the vault (not the process cwd) so a relative proposal path
+    # does not raise here after the mutation already succeeded.
+    path = _resolve_vault_path(proposal["path"], VAULT_ROOT)
+    return {"applied": True, "path": str(path.relative_to(VAULT_ROOT.resolve()))}
 
 
 @mcp.tool()

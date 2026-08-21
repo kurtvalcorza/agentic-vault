@@ -23,6 +23,21 @@ BUNDLE_SENTINEL = "agentic-vault-okf-bundle\n"
 # First-level agent/config workspaces that must never be an export destination,
 # even if they happen to carry the ownership manifest.
 PROTECTED_DIRNAMES = {".git", ".agent", ".claude", ".gemini", ".kiro", ".codex", ".obsidian"}
+# The one supported writable subtree inside an otherwise-protected workspace:
+# the documented `.agent/outputs/` destination for generated artifacts.
+ALLOWED_OUTPUT_PARENT = (".agent", "outputs")
+
+
+def _protected_violation(path: Path) -> bool:
+    """True if any path component is a protected workspace, other than the
+    designated `.agent/outputs/` output subtree."""
+    parts = path.parts
+    for i, part in enumerate(parts):
+        if part in PROTECTED_DIRNAMES:
+            if part == ALLOWED_OUTPUT_PARENT[0] and parts[i + 1 : i + 2] == (ALLOWED_OUTPUT_PARENT[1],):
+                continue
+            return True
+    return False
 
 
 def _safe_rel(path: Path) -> Path:
@@ -41,8 +56,8 @@ def _reject_protected_destination(root: Path, destination: Path) -> None:
         raise ValueError(f"refusing to export onto the vault root: {destination}")
     if destination in root.parents:
         raise ValueError(f"refusing to export onto an ancestor of the vault root: {destination}")
-    if destination.name in PROTECTED_DIRNAMES:
-        raise ValueError(f"refusing to export onto protected directory: {destination}")
+    if _protected_violation(destination):
+        raise ValueError(f"refusing to export into protected workspace: {destination}")
 
 
 def export_okf_bundle(vault_root: Path, output_dir: Path) -> dict[str, Any]:
@@ -190,7 +205,7 @@ def _reject_markdown_output(output: Path) -> None:
     """Graph exports must never overwrite canonical notes or protected config."""
     if output.suffix.lower() == ".md":
         raise ValueError(f"refusing to write a graph export over a Markdown path: {output}")
-    if any(part in PROTECTED_DIRNAMES for part in output.parts):
+    if _protected_violation(output):
         raise ValueError(f"refusing to write a graph export into a protected workspace: {output}")
 
 

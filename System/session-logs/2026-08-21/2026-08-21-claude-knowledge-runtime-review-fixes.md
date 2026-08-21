@@ -61,5 +61,15 @@ Changes are generic, synthetic, and agent-agnostic. Markdown/YAML remains author
 - Direct relations now carry review/provenance metadata (`extraction_confidence`, `claim_confidence`, `review_status`, `created_by`, `reviewed_by`) into the projection, with a disposable-DB migration; claim-derived edges populate them too.
 - Added regression tests for each.
 
+## Sixth pass (head b848a92 review)
+- Export guards now check every vault-relative path component (not just basename) and exempt the documented `.agent/outputs/` destination, so nested protected paths are rejected while the recommended output workspace works.
+- CLI `propose` applies the Markdown/protected-target guard before reading the file, so a secret-bearing target (`.env`, `mcp.json`, `.git/...`) is rejected before its contents are read or printed.
+- `neighbors(include_derived=True)` keeps the unconditional `status='accepted'` filter and toggles only the inferred-edge condition (retracted/candidate edges never returned).
+- CI workflow triggers on all Markdown (`**/*.md`, `*.md`) to match `iter_markdown`'s scan scope (System/, root, custom dirs).
+- Atomic writes preserve the source file mode (mkstemp's 0600 no longer clobbers a 0644 note) across single and batch apply, including rollback.
+- MCP `apply_patch` response resolves the path against the vault, not the process cwd, so a relative proposal path no longer reports false failure after a successful mutation.
+- Duplicate YAML frontmatter keys are rejected (`duplicate frontmatter key`) instead of silently collapsing to the last value.
+- Added regression tests for each (CI-config and the MCP response-path one covered by the code change).
+
 ## Status
 Review fixes implemented on `feat/knowledge-runtime-rfc-2`; PR #3 remains the review surface. Full local pytest (excluding the LinkML-dependency test, which CI runs) is green; `validate` / `build --full` / `health` on the public vault report zero issues.

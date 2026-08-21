@@ -999,3 +999,75 @@ relations:
         assert row["created_by"] == "agent:test"
         assert row["claim_confidence"] == 0.9
         assert json.loads(row["reviewed_by_json"]) == ["user:kurt"]
+
+
+# --- Sixth review pass (head b848a92) regression coverage ---
+
+
+def test_graph_export_allowed_in_agent_outputs(vault: Path) -> None:
+    out = vault / ".agent/outputs/knowledge.jsonld"
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        export_jsonld(idx, out)
+    assert out.exists()
+
+
+def test_okf_export_rejects_nested_protected_destination(vault: Path) -> None:
+    with pytest.raises(ValueError, match="protected workspace"):
+        export_okf_bundle(vault, vault / ".claude/generated/okf")
+
+
+def test_cli_propose_rejects_secret_target(vault: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    (vault / ".env").write_text("SECRET=supersecret\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["vault-knowledge", "--vault", str(vault), "propose", ".env", '{"title": "x"}'])
+    with pytest.raises(SystemExit):
+        cli.main()
+    captured = capsys.readouterr()
+    assert "supersecret" not in captured.out
+
+
+def test_neighbors_include_derived_keeps_accepted_filter(vault: Path) -> None:
+    (vault / "02_Areas/Synthetic/Gamma.md").write_text(
+        "---\nid: entity:gamma\ntype: Entity\ntitle: Gamma\n---\n# Gamma\n", encoding="utf-8"
+    )
+    alpha = vault / "02_Areas/Synthetic/Alpha.md"
+    alpha.write_text(
+        """---
+id: entity:alpha
+type: Entity
+title: Alpha
+relations:
+  - predicate: related_to
+    target: entity:beta
+    status: retracted
+  - predicate: related_to
+    target: entity:gamma
+    status: accepted
+    derivation: inferred
+---
+# Alpha
+""",
+        encoding="utf-8",
+    )
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        neighbors = idx.neighbors("entity:alpha", include_derived=True)
+        targets = {r["target_id"] for r in neighbors}
+        assert "entity:gamma" in targets   # accepted inferred edge is included
+        assert "entity:beta" not in targets  # retracted edge stays filtered out
+
+
+def test_apply_patch_preserves_file_mode(vault: Path) -> None:
+    import os
+    import stat as stat_mod
+
+    path = vault / "02_Areas/Synthetic/Alpha.md"
+    os.chmod(path, 0o644)
+    proposal = propose_frontmatter_patch(path, {"title": "New Title"})
+    apply_patch(proposal, vault)
+    assert stat_mod.S_IMODE(path.stat().st_mode) == 0o644
+
+
+def test_duplicate_frontmatter_keys_rejected() -> None:
+    with pytest.raises(KnowledgeError, match="duplicate frontmatter key"):
+        split_frontmatter("---\nid: x:y\nid: x:z\ntype: Entity\ntitle: Dup\n---\n# Dup\n")
