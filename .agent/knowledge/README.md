@@ -125,22 +125,36 @@ Set `AGENTIC_VAULT_ROOT` when the process is launched outside the vault root. Th
 
 ### Wiring it into a client
 
-Copy `.mcp.json.example` to `.mcp.json` (already gitignored) and fill in this
-vault's absolute path:
+Every client runs the same command — the vault's interpreter, then the launcher —
+but **where that command is declared, and in what schema, is harness-specific**:
 
-```json
-{
-  "mcpServers": {
-    "vault-knowledge": {
-      "type": "stdio",
-      "command": "/ABSOLUTE/PATH/TO/VAULT/.venv/bin/python",
-      "args": ["/ABSOLUTE/PATH/TO/VAULT/.agent/scripts/vault-knowledge-mcp.py"]
-    }
-  }
-}
+| Harness | Config file | Schema |
+|:---|:---|:---|
+| Claude Code | `.mcp.json` at the vault root (project-scoped) | JSON, `mcpServers.<name>` |
+| Kiro | `.kiro/settings/mcp.json` | JSON, `mcpServers.<name>` |
+| Gemini CLI | `settings.json` | JSON, `mcpServers.<name>` |
+| Codex | `~/.codex/config.toml` | **TOML**, `[mcp_servers.<name>]` |
+
+`.mcp.json.example` is the **Claude Code** form. Copy it to `.mcp.json` (already
+gitignored) and replace both paths. Codex does not read that file at all; it
+needs the same command expressed as TOML:
+
+```toml
+[mcp_servers.vault-knowledge]
+command = 'C:\path\to\vault\.venv\Scripts\python.exe'
+args = ['C:\path\to\vault\.agent\scripts\vault-knowledge-mcp.py']
 ```
 
-There are two separate problems here, and they need different solutions.
+**Replace the interpreter path in full, not just the vault directory** — the venv
+layout differs by platform:
+
+```
+Windows      <vault>\.venv\Scripts\python.exe
+macOS/Linux  <vault>/.venv/bin/python
+```
+
+Beyond that, there are two separate problems here, and they need different
+solutions.
 
 **Locating the launcher is the config's job — use absolute paths.** A client may
 start a stdio server from any working directory, so a relative `command` or

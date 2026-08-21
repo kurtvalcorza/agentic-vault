@@ -14,9 +14,15 @@ an MCP client:
   bare ``${CLAUDE_PROJECT_DIR}`` expands to nothing and needs the
   ``${CLAUDE_PROJECT_DIR:-.}`` default. Other clients differ again.
 
-So this launcher resolves the vault root from its own location instead — no
-absolute path in any client config, and the same invocation works for every
-harness. Point any MCP client at this file (see ``.mcp.json.example``).
+So this launcher resolves the vault root from its own location instead. That
+solves *which vault the server reads*, and removes any need to set
+``AGENTIC_VAULT_ROOT``.
+
+It does not solve *how the client finds this file* — that stays the client
+config's job, and it should use an absolute path, because a client may spawn the
+server from any working directory. See ``.mcp.json.example`` for the Claude Code
+form and ``.agent/knowledge/README.md`` for the other harnesses, whose config
+location and schema differ.
 
 Writes are disabled by default. ``knowledge_apply_patch`` and
 ``knowledge_apply_batch`` mutate canonical Markdown, so enabling them is a
