@@ -125,37 +125,47 @@ Set `AGENTIC_VAULT_ROOT` when the process is launched outside the vault root. Th
 
 ### Wiring it into a client
 
-Copy `.mcp.json.example` to `.mcp.json` and point `command` at the interpreter
-that has the runtime installed:
+Copy `.mcp.json.example` to `.mcp.json` (already gitignored) and fill in this
+vault's absolute path:
 
 ```json
 {
   "mcpServers": {
     "vault-knowledge": {
       "type": "stdio",
-      "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
-      "args": ["${CLAUDE_PROJECT_DIR:-.}/.agent/scripts/vault-knowledge-mcp.py"]
+      "command": "/ABSOLUTE/PATH/TO/VAULT/.venv/bin/python",
+      "args": ["/ABSOLUTE/PATH/TO/VAULT/.agent/scripts/vault-knowledge-mcp.py"]
     }
   }
 }
 ```
 
-`.agent/scripts/vault-knowledge-mcp.py` exists because neither of the server's
-two ways of finding the vault survives contact with a real MCP client:
+There are two separate problems here, and they need different solutions.
 
-- **Working directory** is not guaranteed. Clients spawn stdio servers from
-  wherever they happen to be, so the `AGENTIC_VAULT_ROOT` default of `.` is a
-  coin flip.
-- **Variable expansion is client-specific.** Claude Code expands `${VAR}` in
-  `command` and `args`, but sets `CLAUDE_PROJECT_DIR` in the *server's*
-  environment rather than its own — so a bare `${CLAUDE_PROJECT_DIR}` expands to
-  nothing and the `:-.` default is required. Expansion inside `env` is not
-  documented for project scope at all. Other clients differ again.
+**Locating the launcher is the config's job — use absolute paths.** A client may
+start a stdio server from any working directory, so a relative `command` or
+`args` entry resolves against a directory you do not control:
 
-The launcher sidesteps both by resolving the vault root from its own location.
-No absolute path ends up in any client config, and the same entry works on every
-machine that clones the vault. Verified by spawning it from an unrelated working
-directory with no environment preset: 22 tools listed, correct vault resolved.
+```
+"${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python"
+  -> "./.venv/bin/python"          # CLAUDE_PROJECT_DIR is empty at expansion time
+  -> "<unrelated cwd>/.venv/bin/python"
+  -> FileNotFoundError; the server never starts
+```
+
+Claude Code sets `CLAUDE_PROJECT_DIR` in the **server's** environment, not its
+own, so it is empty when the config is expanded and the `:-.` default leaves a
+cwd-relative path. Expansion inside `env` is not documented for project scope
+either. `.mcp.json` is gitignored precisely so it can carry machine-specific
+absolute paths — use them. Substitute a project-root variable only if your client
+guarantees the working directory, and treat that as client-specific wiring.
+
+**Locating the vault is the launcher's job — that part is solved.**
+Once started, `.agent/scripts/vault-knowledge-mcp.py` resolves the vault root
+from its own `__file__`, so you never set `AGENTIC_VAULT_ROOT` and the server
+reads the right vault no matter which directory it was launched from. Verified by
+spawning the launcher by absolute path from an unrelated working directory with
+no environment preset: 22 tools listed, correct vault resolved.
 
 **Writes stay off unless you turn them on.** The launcher defaults
 `AGENTIC_VAULT_KNOWLEDGE_READ_ONLY` to `1`, so `knowledge_apply_patch` and

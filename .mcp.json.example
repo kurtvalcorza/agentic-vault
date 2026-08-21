@@ -1,31 +1,40 @@
 {
   "_comment": [
-    "Example MCP wiring for the optional knowledge runtime. Copy to .mcp.json",
-    "(gitignored) and adjust the interpreter path for your environment.",
+    "Example MCP wiring for the optional knowledge runtime.",
+    "Copy to .mcp.json (already gitignored) and replace both /ABSOLUTE/PATH/TO/VAULT",
+    "placeholders with this vault's real path.",
     "",
-    "'command' must be the interpreter that has agentic_vault_knowledge",
-    "installed. If you installed into a venv at the vault root, that is",
-    ".venv/bin/python (macOS/Linux) or .venv/Scripts/python.exe (Windows);",
-    "a bare 'python' only works if the runtime is on the default interpreter.",
+    "USE ABSOLUTE PATHS. A client may start a stdio server from any working",
+    "directory, so a relative 'command' or 'args' entry resolves against a",
+    "directory you do not control and the server never starts. .mcp.json is",
+    "gitignored precisely so it can hold machine-specific absolute paths.",
     "",
-    "The launcher resolves the vault root from its own location, so no absolute",
-    "path is needed here and the same entry works on any machine that clones",
-    "the vault. ${CLAUDE_PROJECT_DIR:-.} is Claude Code's project root; the",
-    ":-. default is required because CLAUDE_PROJECT_DIR is set in the server's",
-    "environment, not the client's, so a bare ${CLAUDE_PROJECT_DIR} is empty.",
-    "Other clients: substitute their project-root variable, or use an absolute",
-    "path — only this file needs to know it.",
+    "'command' must be the interpreter that has agentic_vault_knowledge installed:",
+    "  <vault>/.venv/bin/python        (macOS/Linux)",
+    "  <vault>/.venv/Scripts/python.exe (Windows)",
+    "A bare 'python' only works if the runtime is on the default interpreter.",
+    "",
+    "The launcher then resolves the vault root from its own __file__ location, so",
+    "you do not need to set AGENTIC_VAULT_ROOT and the server works regardless of",
+    "the working directory it was started in. That is the launcher's job; locating",
+    "the launcher itself is this file's job, which is why the paths are absolute.",
     "",
     "Writes are OFF by default. To allow knowledge_apply_patch/apply_batch to",
     "mutate canonical Markdown, add:",
-    "  \"env\": { \"AGENTIC_VAULT_KNOWLEDGE_READ_ONLY\": \"0\" }"
+    "  \"env\": { \"AGENTIC_VAULT_KNOWLEDGE_READ_ONLY\": \"0\" }",
+    "",
+    "Claude Code users may substitute ${CLAUDE_PROJECT_DIR:-.} for the vault path,",
+    "but only if the server is always started with the vault as the project root:",
+    "CLAUDE_PROJECT_DIR is set in the SERVER's environment, not the client's, so it",
+    "is empty at config-expansion time and the :-. default leaves a cwd-relative",
+    "path. Absolute paths avoid that failure mode entirely."
   ],
   "mcpServers": {
     "vault-knowledge": {
       "type": "stdio",
-      "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/Scripts/python.exe",
+      "command": "/ABSOLUTE/PATH/TO/VAULT/.venv/bin/python",
       "args": [
-        "${CLAUDE_PROJECT_DIR:-.}/.agent/scripts/vault-knowledge-mcp.py"
+        "/ABSOLUTE/PATH/TO/VAULT/.agent/scripts/vault-knowledge-mcp.py"
       ]
     }
   }
