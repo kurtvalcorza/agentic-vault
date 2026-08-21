@@ -7,6 +7,7 @@ import pytest
 from agentic_vault_knowledge.core import (
     ConflictError,
     apply_patch,
+    iter_markdown,
     parse_note,
     propose_frontmatter_patch,
     validate_note,
@@ -122,3 +123,58 @@ def test_patch_applies_when_unchanged(vault: Path) -> None:
     proposal = propose_frontmatter_patch(path, {"title": "Changed"})
     apply_patch(proposal, vault)
     assert "title: Changed" in path.read_text(encoding="utf-8")
+
+
+COMMAND_DEFINITION = """---
+argument-hint: [optional: "interim" snapshot]
+---
+# Report
+"""
+
+SKILL_TEMPLATE = """---
+title: {{title}}
+---
+# {{title}}
+"""
+
+
+def _scanned(vault: Path) -> set[str]:
+    return {p.relative_to(vault).as_posix() for p in iter_markdown(vault)}
+
+
+def test_dot_directories_are_never_scanned(vault: Path) -> None:
+    """Agent workspaces and tool config are not canonical notes.
+
+    Their Markdown is command definitions and skill templates whose frontmatter
+    is not note frontmatter, so scanning them turns the fail-closed build into a
+    hard stop on files that were never knowledge in the first place.
+    """
+    # A slash-command definition: valid YAML for a command, fatal as a note
+    # (the colon inside the flow sequence is a parse error).
+    (vault / ".claude/commands").mkdir(parents=True)
+    (vault / ".claude/commands/report.md").write_text(COMMAND_DEFINITION, encoding="utf-8")
+    # A skill template using placeholder frontmatter (unhashable dict as a key).
+    (vault / ".codex/prompts").mkdir(parents=True)
+    (vault / ".codex/prompts/note.md").write_text(SKILL_TEMPLATE, encoding="utf-8")
+    # Obsidian's own config directory.
+    (vault / ".obsidian/plugins/example").mkdir(parents=True)
+    (vault / ".obsidian/plugins/example/README.md").write_text("# plugin\n", encoding="utf-8")
+
+    scanned = _scanned(vault)
+    from_dot_dirs = {
+        path for path in scanned if any(part.startswith(".") for part in path.split("/")[:-1])
+    }
+    assert not from_dot_dirs, f"dot-directory Markdown was scanned: {sorted(from_dot_dirs)}"
+    # ...while ordinary PARA notes are still picked up.
+    assert "02_Areas/Sample/Sample Concept.md" in scanned
+
+
+def test_non_dot_trees_still_need_an_explicit_marker(vault: Path) -> None:
+    """The dot rule is not a licence to guess at ordinary folder names."""
+    legacy = vault / "04_Archives/legacy"
+    legacy.mkdir(parents=True)
+    (legacy / "Old Note.md").write_text("# Old\n", encoding="utf-8")
+    assert "04_Archives/legacy/Old Note.md" in _scanned(vault)
+
+    (legacy / ".knowledge-ignore").write_text("skip\n", encoding="utf-8")
+    assert "04_Archives/legacy/Old Note.md" not in _scanned(vault)
