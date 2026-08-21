@@ -38,9 +38,10 @@ This is the personal knowledge management (PKM) vault of **{{OWNER_NAME}}**. It 
 - `.agent/knowledge/` is an **optional** typed knowledge layer: a disposable SQLite projection of the Markdown (entities, relations, claims, evidence, provenance, graph). Markdown stays canonical. **If it is not installed, fall back to ordinary vault search rather than blocking.**
 - **`objects: 0` is expected** on an existing vault — a note joins the semantic graph only when it has **both** `id` and `type`. Everything else is still indexed for navigation.
 - The build **fails closed**: one unparseable file blocks the whole index. Dot-directories are skipped automatically; drop a `.knowledge-ignore` file in any *non-dot* scaffolding tree.
-- **Writes are off by default.** `knowledge_apply_patch` / `knowledge_apply_batch` raise unless `AGENTIC_VAULT_KNOWLEDGE_READ_ONLY=0`. Enabling that edits canonical Markdown — an outward state change; confirm with the owner first.
+- **The write gate covers MCP only.** `knowledge_apply_patch` / `knowledge_apply_batch` raise unless `AGENTIC_VAULT_KNOWLEDGE_READ_ONLY=0` — but the **CLI is not gated**: `vault-knowledge apply-patch` / `apply-batch` write canonical Markdown with no environment check. Either path is an outward state change; confirm with the owner first, and never treat the MCP default as protection when running the CLI.
 - Never edit the generated database as knowledge; it is derived and rebuildable.
-- **Connecting any MCP server to this vault:** check its write surface first — some expose ungated file delete/overwrite, and git only snapshots at session end. Never copy credentials into `.mcp.json` or other tracked config.
+- **MCP wiring uses absolute paths in `.mcp.json`** — the narrow Path Safety exception for machine-local, gitignored client config launched by an external process. Keep absolute paths out of scripts and tracked files.
+- **Connecting any MCP server to this vault:** check its write surface first — some expose ungated file delete/overwrite, and git only snapshots at session end. Keep credentials to **one copy**: a gitignored `mcp.json` is fine when a credential has no other home, but if it already lives in a plugin's own gitignored config, read it from there at runtime rather than duplicating it.
 
 ### 6. Security & Standards
 - **PII/Secrets**: Never store API keys or unmasked PII in markdown notes.

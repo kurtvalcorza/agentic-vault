@@ -130,7 +130,7 @@ The vault's live work queue is the Obsidian Kanban board at [[01_Projects/To Do]
 
 - **PII Redaction**: Sanitize personally identifiable information in shared or exported content
 - **Agent Boundaries**: `.agent/` is the shared write space; respect cross-agent isolation for `.gemini/`, `.claude/`, `.kiro/`
-- **Secret Management**: Never store API keys or tokens in Markdown notes; use `.env` files (gitignored) and `mcp.json`
+- **Secret Management**: Never store API keys or tokens in Markdown notes; use `.env` files (gitignored) and `mcp.json`. **One copy only** — if a credential already has a canonical gitignored home (a plugin's own config, a `.env`), reference or read it at runtime instead of duplicating it into a second file. Every copy is another thing to rotate and another way to leak.
 - **Script Safety**: No hardcoded paths or drive letters; validate script existence before invoking
 - **External Integrations**: Vault contents are private by default; confirm scope **with the user** before syncing, publishing, or uploading any vault content to external services
 
@@ -159,7 +159,7 @@ Agents SHOULD NOT preload all steering files at session start. Read them when th
 
 1.  **Protocol Inheritance**: This file (`AGENTS.md`) is the root protocol.
 2.  **Skills First**: Always check `.agent/skills/` and `.agent/SKILLS-REGISTRY.md` before implementing manually. If no matching skill exists, proceed directly — do not block.
-3.  **Path Safety**: Vault root = the directory containing this `AGENTS.md` file. Resolve dynamically from the agent's working directory. Never hardcode drive letters or absolute paths.
+3.  **Path Safety**: Vault root = the directory containing this `AGENTS.md` file. Resolve dynamically from the agent's working directory. Never hardcode drive letters or absolute paths in notes, skills, scripts, or any tracked file — anything that must work on another clone. **Narrow exception:** machine-local, gitignored client config that is read by an external process which cannot resolve vault-relative paths (e.g. `.mcp.json`, which an MCP client may launch from any working directory). Such files are not part of the vault's portable surface. Prefer a launcher that resolves the root itself, so the absolute path stops at the config boundary rather than spreading into scripts.
 4.  **Zettelkasten Enrichment**: Filing is connecting. Check atomicity (one idea per note), detect duplicates, discover connections (3-5 minimum; actively search before settling for fewer), insert `[[WikiLinks]]`, and add backlinks. Folder placement alone is insufficient. See `universal-triager` Step 3.
 5.  **Source Catalog**: Every source encountered gets an entry in `03_Resources/RESOURCE-INDEX.md` Source Catalog table, even without a vault note. The `universal-triager` handles this for `03_Resources/` items.
 6.  **Preserve Frontmatter**: Never strip YAML metadata from existing files.
@@ -170,7 +170,7 @@ Agents SHOULD NOT preload all steering files at session start. Read them when th
 11. **Obsidian CLI**: For vault-level operations (batch search, orphan detection, plugin management), use the `obsidian-cli` skill — not raw file-system tools.
 12. **Local Git Snapshots**: The vault root is a local git repo (notes + config scope). Commits run **automatically at session end** via `.agent/scripts/vault-git-commit.ps1`. Never commit secrets or nested repos. See **Version Control** below.
 13. **Audit Cadence**: Quarterly stack audit. On/after a quarter boundary (Mar 1 / Jun 1 / Sep 1 / Dec 1), check `System/AUDIT-LOG.md`; if there's no entry for the current quarter, prompt to run `optimize-workspace`. Pruning is human-gated — the audit proposes, the owner approves. See **Audit Cadence** below.
-14. **Knowledge Runtime**: Optional typed knowledge layer in `.agent/knowledge/`. If installed, prefer it over manual graph reconstruction; mutations are proposal-first and **writes are off by default**. See **Knowledge Runtime & MCP** below.
+14. **Knowledge Runtime**: Optional typed knowledge layer in `.agent/knowledge/`. If installed, prefer it over manual graph reconstruction; mutations are proposal-first. **The MCP write gate does not cover the CLI** — `apply-patch` / `apply-batch` write canonical Markdown either way. See **Knowledge Runtime & MCP** below.
 
 ## Knowledge Runtime & MCP
 
@@ -180,24 +180,25 @@ Full detail: `.agent/knowledge/README.md`. The agent-facing contract is the `kno
 
 ### Working with it
 
-- **Install** (from the vault root): `python -m pip install -e './.agent/knowledge[test,linkml]'`, or `uv pip install -e ...` for a uv-managed venv, which ships no `pip`.
+- **Install** (from the vault root): `python -m pip install -e './.agent/knowledge[test,linkml]'`. A uv-managed venv ships no `pip`, so use `uv pip install -e './.agent/knowledge[test,linkml]'` instead.
 - **Build**: `vault-knowledge --vault . build`. The build **fails closed** — one unparseable file blocks the whole index, so scan scope is a correctness concern. Dot-directories are skipped automatically; drop a `.knowledge-ignore` file in any *non-dot* tree that holds scaffolding rather than notes (archived skill backups, generated exports, vendored docs).
 - **`objects: 0` is the expected first result** on an existing vault, not a failure. A note joins the semantic graph only when it carries **both** `id` and `type`; everything else is still indexed for navigation.
 - **`type` collides with a common Obsidian convention.** The schema needs a class name (`Project`, `Concept`, `Source`, …), while many vaults already use `type: book` / `type: guide`. Adding an `id` to such a note turns a harmless key into a build failure. Migrate by *moving* the old meaning to another field, not overwriting it.
 - **Never edit the generated database as knowledge.** It is derived and disposable.
+- **Mutations are proposal-first** — `propose → validate → apply`. `apply` writes canonical Markdown; see the write-gate note below for what is and is not gated.
 
 ### MCP
 
-The runtime exposes 22 `knowledge_*` tools over stdio via `.agent/scripts/vault-knowledge-mcp.py`, which resolves the vault root from its own location. Wire it with `.mcp.json.example` — copy to `.mcp.json` (gitignored) and use **absolute paths**, since a client may spawn the server from any working directory. Config location and schema are harness-specific; see the table in `.agent/knowledge/README.md`.
+The runtime exposes 22 `knowledge_*` tools over stdio via `.agent/scripts/vault-knowledge-mcp.py`, which resolves the vault root from its own location. Wire it with `.mcp.json.example` — copy to `.mcp.json` (gitignored) and use **absolute paths**, since a client may spawn the server from any working directory. This is the narrow exception carved out in Operational Protocol 3: `.mcp.json` is machine-local, gitignored, and consumed by an external client that cannot resolve vault-relative paths. Config location and schema are harness-specific; see the table in `.agent/knowledge/README.md`.
 
-> **Writes are off by default.** `knowledge_apply_patch` / `knowledge_apply_batch` raise unless `AGENTIC_VAULT_KNOWLEDGE_READ_ONLY=0`. Enabling that lets an agent edit canonical Markdown — treat it as an **outward state change** and confirm with the owner first, per Security & Privacy Protocols.
+> **The write gate covers MCP only.** `knowledge_apply_patch` / `knowledge_apply_batch` raise unless `AGENTIC_VAULT_KNOWLEDGE_READ_ONLY=0`. **The CLI is not gated** — `vault-knowledge apply-patch` / `apply-batch` write canonical Markdown with no environment check. Either path is an **outward state change**: confirm with the owner before applying, and do not treat the MCP default as protection when running the CLI.
 
 ### Adding other MCP servers
 
 The same rules apply to any MCP server pointed at this vault, and two are worth stating explicitly because they are easy to get wrong:
 
 - **Check the write surface before connecting.** Some servers (notably ones that drive a live Obsidian instance through the Local REST API) expose ungated file delete/overwrite tools. Since git snapshots only run at session end, a destroy-and-recreate inside one session leaves no restore point. Treat destructive calls as requiring explicit owner confirmation.
-- **Never copy credentials into `.mcp.json` or any tracked config.** Read them at runtime from their own gitignored location, as `vault-knowledge-mcp.py` does for its vault root.
+- **Keep credentials to one copy.** A gitignored `mcp.json` is an acceptable home for a credential that has no other one (Secret Management, above). But when the credential already lives somewhere canonical and gitignored — a plugin's own config file, a `.env` — read it at runtime from there rather than pasting a second copy into the client config. Never put one in a *tracked* file.
 
 ## Version Control (Local Git)
 
@@ -242,4 +243,4 @@ The vault stack gets a **quarterly audit** — prune what drifts, keep what comp
 - Full glossary: `System/memory/glossary.md` | Profiles: `System/memory/people/` | Projects: `System/memory/projects/`
 
 ---
-**Last Updated:** {{DATE}} | **Version:** 1.4 (Added the **Knowledge Runtime & MCP** section — the optional `.agent/knowledge/` typed knowledge layer was shipped without any mention in the constitution. Covers install, fail-closed builds and `.knowledge-ignore` scan scope, why `objects: 0` is the expected first result on an existing vault, the collision between the schema's `type` and the ordinary Obsidian `type:` key, MCP wiring via `.agent/scripts/vault-knowledge-mcp.py` with absolute paths, and the read-only-by-default write gate. Adds guidance for connecting *any* MCP server to a vault: check the write surface first, and never copy credentials into tracked config. Plus Operational Protocol 14 and a Steering File Priority row.)
+**Last Updated:** {{DATE}} | **Version:** 1.4 (Added the **Knowledge Runtime & MCP** section — the optional `.agent/knowledge/` typed knowledge layer was shipped without any mention in the constitution. Covers install, fail-closed builds and `.knowledge-ignore` scan scope, why `objects: 0` is the expected first result on an existing vault, the collision between the schema's `type` and the ordinary Obsidian `type:` key, MCP wiring, and the write gate — which covers **MCP only**; the CLI's `apply-patch` / `apply-batch` are ungated. Adds guidance for connecting *any* MCP server: check the write surface first, and keep credentials to one copy. Reconciles two rules this section would otherwise have contradicted — **Path Safety** gains a narrow exception for machine-local gitignored client config such as `.mcp.json`, and **Secret Management** gains a one-copy principle so a gitignored `mcp.json` stays a valid home while duplicating an existing credential does not (mirrored in `security-best-practices.md`). Plus Operational Protocol 14 and a Steering File Priority row.)
