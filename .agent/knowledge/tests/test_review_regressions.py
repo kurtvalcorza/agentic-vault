@@ -1452,7 +1452,16 @@ def _codes_for_id(vault: Path, object_id: str) -> set[str]:
 
 @pytest.mark.parametrize("object_id", VALID_IDS)
 def test_valid_object_ids_accepted(vault: Path, object_id: str) -> None:
-    assert "invalid-id" not in _codes_for_id(vault, object_id)
+    """A valid id must produce *no* errors, not merely avoid `invalid-id`.
+
+    Asserting only the absence of `invalid-id` would keep passing if a future
+    change made one of these fixtures fail at the parse layer instead — a
+    colon-bearing id like `source:doi:10.1234/x` is exactly the shape that could
+    regress that way. Under fail-closed builds (ADR-0005) any error is fatal, so
+    the assertion has to be that none is raised.
+    """
+    codes = _codes_for_id(vault, object_id)
+    assert codes == set(), f"{object_id!r} should be accepted cleanly, got {sorted(codes)}"
 
 
 @pytest.mark.parametrize("object_id,reason", INVALID_IDS)

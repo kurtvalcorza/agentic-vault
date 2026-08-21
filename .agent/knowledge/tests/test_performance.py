@@ -175,22 +175,44 @@ def test_refresh_short_circuits_on_unchanged_vault(large_vault: Path, capsys) ->
     tells you nothing about caching. `refresh()` computes the fingerprint and
     returns early when it matches.
 
-    The saving is real but bounded: the fingerprint is content-based on purpose
+    The saving is real but bounded: the fingerprint carries a content digest
     (ADR-0003), so the warm path still reads and hashes every file. It skips the
     parse-validate-write half, not the read half.
+
+    Timing alone cannot prove the short-circuit exists. If the `_last_fingerprint`
+    early return were deleted, the warm call would fall through to an incremental
+    `build()` whose unchanged hashes skip every upsert — still faster than cold
+    population, so `warm < cold` would keep passing. The load-bearing assertion is
+    therefore that the warm path does not call `build()` at all.
     """
     with RuntimeIndex(_fresh_db(large_vault, "refresh")) as idx:
+        builds: list[str] = []
+        real_build = idx.build
+
+        def counting_build(*args, **kwargs):
+            builds.append("call")
+            return real_build(*args, **kwargs)
+
+        idx.build = counting_build  # type: ignore[method-assign]
+
         cold_s, cold_issues = _time(lambda: idx.refresh(large_vault, _schema(large_vault)))
+        builds_after_cold = len(builds)
         warm_s, warm_issues = _time(lambda: idx.refresh(large_vault, _schema(large_vault)))
+        builds_after_warm = len(builds)
         assert cold_issues == [] and warm_issues == []
 
     saved = (1 - warm_s / max(cold_s, 1e-6)) * 100
     with capsys.disabled():
         print(
-            f"\n  refresh (cold): {cold_s * 1000:7.1f} ms"
-            f"\n  refresh (warm): {warm_s * 1000:7.1f} ms  ({saved:.0f}% saved)"
+            f"\n  refresh (cold): {cold_s * 1000:7.1f} ms  (build calls: {builds_after_cold})"
+            f"\n  refresh (warm): {warm_s * 1000:7.1f} ms  (build calls: +"
+            f"{builds_after_warm - builds_after_cold})  ({saved:.0f}% saved)"
         )
-    assert warm_s < cold_s, "an unchanged vault must hit the fingerprint short-circuit"
+    assert builds_after_cold == 1, "a cold refresh must populate the index"
+    assert builds_after_warm == 1, (
+        "the warm refresh called build() — the fingerprint short-circuit is not engaging"
+    )
+    assert warm_s < cold_s, "the short-circuit should also be measurably cheaper"
 
 
 def test_iter_markdown_does_not_materialise_the_walk(large_vault: Path, monkeypatch, capsys) -> None:
