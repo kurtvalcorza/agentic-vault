@@ -13,7 +13,8 @@ source-section: "Security & Privacy Protocols"
 ### Secret Management
 - Never store API keys, passwords, or tokens in Markdown notes or frontmatter
 - Use `.env` files (gitignored) for credentials needed by scripts
-- MCP server credentials belong in `mcp.json` — never in steering docs or notes
+- MCP server credentials belong in `mcp.json` (gitignored) — never in steering docs, notes, or any tracked file
+- **One copy only.** If a credential already has a canonical gitignored home — a plugin's own config file, a `.env` — have the server or its launcher read it from there at runtime instead of pasting a second copy into `mcp.json`. Duplicating a secret doubles what you must rotate and what can leak; a launcher that reads the original keeps one source of truth
 - Audit hook patterns to ensure sensitive files aren't sent to cloud AI
 
 ### Agent Boundaries

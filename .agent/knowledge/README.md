@@ -187,7 +187,17 @@ The agent-facing mutation flow is proposal-first:
 propose -> validate -> hash/conflict check -> atomic apply -> re-index
 ```
 
-Multi-file batches are staged before replacement and rolled back if replacement fails. MCP is **read-only by default**. Set `AGENTIC_VAULT_KNOWLEDGE_READ_ONLY=0` only when the host/user intends to allow canonical writes.
+Multi-file batches are staged before replacement and rolled back if replacement fails.
+
+**Canonical writes are off by default on every entry point.** `AGENTIC_VAULT_KNOWLEDGE_READ_ONLY` defaults to on and is honoured identically by the MCP server and the CLI:
+
+| Entry point | Behaviour when read-only |
+|:---|:---|
+| `knowledge_apply_patch` / `knowledge_apply_batch` | raises `PermissionError` |
+| `vault-knowledge apply-patch` / `apply-batch` | refuses, exit code 2, file untouched |
+| `propose`, `validate-patch`, `validate-batch` | unaffected — only `apply` is gated |
+
+Set `AGENTIC_VAULT_KNOWLEDGE_READ_ONLY=0` only when the host/user intends to allow canonical writes. A guarantee that held for one entry point but not another would be worse than none, since it invites setting the MCP default and assuming the vault is protected.
 
 ## MCP
 

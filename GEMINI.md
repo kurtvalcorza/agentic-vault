@@ -1,7 +1,7 @@
 # Gemini CLI: Vault Instructions
 
 > **Source of Truth:** This file is a **derived digest** of [[AGENTS.md]]. Refer to [[AGENTS.md]] for the canonical version of all protocols. If anything here conflicts with AGENTS.md, AGENTS.md wins.
-> **Synced with AGENTS.md version:** 1.3
+> **Synced with AGENTS.md version:** 1.4
 
 ## Project Overview
 This is the personal knowledge management (PKM) vault of **{{OWNER_NAME}}**. It uses a **Hybrid PARA + Zettelkasten** structure to organize projects, long-term knowledge, and references.
@@ -34,7 +34,16 @@ This is the personal knowledge management (PKM) vault of **{{OWNER_NAME}}**. It 
 - Session-end snapshots run `.agent/scripts/vault-git-commit.ps1` (other agents' hooks trigger this automatically; Gemini sessions may run it manually at end of work).
 - **NEVER commit secrets** or nested git repos.
 
-### 5. Security & Standards
+### 5. Knowledge Runtime & MCP (optional — read AGENTS.md § Knowledge Runtime & MCP before use)
+- `.agent/knowledge/` is an **optional** typed knowledge layer: a disposable SQLite projection of the Markdown (entities, relations, claims, evidence, provenance, graph). Markdown stays canonical. **If it is not installed, fall back to ordinary vault search rather than blocking.**
+- **`objects: 0` is expected** on an existing vault — a note joins the semantic graph only when it has **both** `id` and `type`. Everything else is still indexed for navigation.
+- The build **fails closed**: one unparseable file blocks the whole index. Dot-directories are skipped automatically; drop a `.knowledge-ignore` file in any *non-dot* scaffolding tree.
+- **Writes are off by default on every entry point.** `AGENTIC_VAULT_KNOWLEDGE_READ_ONLY` is honoured identically by MCP and the CLI: `knowledge_apply_patch` / `knowledge_apply_batch` raise, and `vault-knowledge apply-patch` / `apply-batch` refuse with exit code 2. Setting it to `0` lets an agent edit canonical Markdown — an outward state change; confirm with the owner first. `propose` and `validate-*` are unaffected.
+- Never edit the generated database as knowledge; it is derived and rebuildable.
+- **MCP wiring uses absolute paths in the client's own config** — the narrow Path Safety exception for machine-local, gitignored config launched by an external process. Keep absolute paths out of scripts and tracked files. **The file differs per harness:** Gemini CLI reads `settings.json`, not the `.mcp.json` that `.mcp.json.example` targets — that example is Claude Code's project-scoped format. See the per-harness table in `.agent/knowledge/README.md` before wiring.
+- **Connecting any MCP server to this vault:** check its write surface first — some expose ungated file delete/overwrite, and git only snapshots at session end. Keep credentials to **one copy**: a gitignored `mcp.json` is fine when a credential has no other home, but if it already lives in a plugin's own gitignored config, read it from there at runtime rather than duplicating it.
+
+### 6. Security & Standards
 - **PII/Secrets**: Never store API keys or unmasked PII in markdown notes.
 - **Tone**: Professional for `01_Projects/`, `02_Areas/`, `03_Resources/`, `.agent/outputs/`; casual for `Inbox/` and personal notes. House voice → `.agent/steering/voice.md`; what to avoid → `.agent/steering/anti-style.md`.
 
