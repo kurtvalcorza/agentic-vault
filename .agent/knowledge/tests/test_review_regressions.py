@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -985,7 +986,7 @@ relations:
     review_status: pending
     created_by: agent:test
     reviewed_by:
-      - user:kurt
+      - user:reviewer
 ---
 # Alpha
 """,
@@ -1000,7 +1001,7 @@ relations:
         assert row["review_status"] == "pending"
         assert row["created_by"] == "agent:test"
         assert row["claim_confidence"] == 0.9
-        assert json.loads(row["reviewed_by_json"]) == ["user:kurt"]
+        assert json.loads(row["reviewed_by_json"]) == ["user:reviewer"]
 
 
 # --- Sixth review pass (head b848a92) regression coverage ---
@@ -1059,8 +1060,12 @@ relations:
         assert "entity:beta" not in targets  # retracted edge stays filtered out
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="POSIX permission bits are not representable on NTFS: os.chmod only "
+    "toggles the read-only attribute, so 0o644 reads back as 0o666.",
+)
 def test_apply_patch_preserves_file_mode(vault: Path) -> None:
-    import os
     import stat as stat_mod
 
     path = vault / "02_Areas/Synthetic/Alpha.md"

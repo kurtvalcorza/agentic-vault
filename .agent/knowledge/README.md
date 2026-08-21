@@ -23,6 +23,19 @@ python -m venv .venv
 pip install -e './.agent/knowledge[test,linkml]'
 ```
 
+If the venv was created by [uv](https://docs.astral.sh/uv/), it ships no `pip`
+and the line above fails with `No module named pip`. Use uv's own installer
+against the same environment:
+
+```bash
+uv pip install -e './.agent/knowledge[test,linkml]'
+```
+
+Verify with `python -c "import agentic_vault_knowledge"`. If you have the runtime
+installed editable from more than one vault, an `import` resolves to whichever
+one is on `sys.path` first — when running this project's own tests, force the
+working tree with `PYTHONPATH=.agent/knowledge pytest .agent/knowledge/tests`.
+
 Baseline operation needs no LLM, API key, embeddings, graph server, or remote service. Optional semantic enrichment and retrieval backends implement adapter protocols and return candidates/ranked results; they never become canonical storage.
 
 ## CLI
