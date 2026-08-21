@@ -70,6 +70,48 @@ relations:
 
 Operational Markdown can remain ordinary Markdown. Existing templates, session logs, skills, steering docs, Kanban files, and other non-semantic files do not need to conform to the knowledge schema.
 
+## Adopting this in an existing vault
+
+The seed notes above ship wired together, so a fresh clone returns a non-empty
+`health` and a working `trace_path`. Pointing the runtime at a vault that already
+has thousands of notes has three sharp edges worth knowing before the first build.
+
+**1. `objects: 0` is the expected first result, not a failure.** A note joins the
+semantic graph only when it has *both* `id` and `type`. Everything else is still
+indexed for navigation — `health` will show a large `files` and `navigation_edges`
+count with zero objects. That is the runtime working, not a broken build.
+
+**2. `type` is claimed by the schema, and your vault may already use it.**
+`type` is a common Obsidian frontmatter key holding user-defined values —
+`type: book`, `type: guide`, `type: meeting-note`. Here it must name a core or
+declared extension class (`Project`, `Concept`, `Source`, `Person`, …). Those two
+conventions collide the moment a note gains an `id`:
+
+```yaml
+id: source:smart-notes
+type: book          # -> invalid-type + unknown-type, both errors
+```
+
+A note with a non-schema `type` and no `id` is simply non-semantic and is left
+alone. Adding `id` to it is what turns a harmless key into a build failure, so
+migrate `type` values as you adopt `id`, not before.
+
+**3. The build fails closed, so scan scope is a correctness question.** One
+unparseable file blocks the entire index. Dot-directories are never scanned —
+`.git`, `.venv`, `.obsidian`, `.github`, and every agent workspace (`.agent`,
+`.claude`, `.codex`, `.gemini`, `.kiro`, and whatever your setup adds). Their
+Markdown is command definitions and skill templates whose frontmatter is not note
+frontmatter, and scanning it produces errors on files that were never knowledge:
+
+```yaml
+argument-hint: [optional: "interim" snapshot]   # YAML flow-sequence error
+title: {{title}}                                # unhashable type: 'dict'
+```
+
+For any *non-dot* tree that holds scaffolding rather than notes — archived skill
+backups, generated exports, vendored docs — drop a `.knowledge-ignore` file in it.
+The whole subtree is then skipped, including through symlinks that point into it.
+
 ## Claims and promotion
 
 Claims are first-class and carry their own lifecycle/provenance:

@@ -272,7 +272,7 @@ def iter_markdown(vault_root: Path) -> Iterator[Path]:
     # like "generated"/"export" are NOT excluded globally — a real PARA folder
     # may legitimately use them; the runtime's own generated tree is excluded by
     # exact path, and OKF bundles carry a `.knowledge-ignore` marker instead.
-    excluded = {".git", ".venv", "node_modules", "__pycache__"}
+    excluded = {"node_modules", "__pycache__"}
     runtime_generated = Path(".agent") / "knowledge" / "generated"
     root = vault_root.resolve()
     for path in root.rglob("*.md"):
@@ -295,6 +295,18 @@ def iter_markdown(vault_root: Path) -> Iterator[Path]:
         except ValueError:
             pass
         if any(part in excluded for r in rels for part in r.parts):
+            continue
+        # Dot-directories are tooling, never canonical notes: `.git`, `.venv`,
+        # the Obsidian config (`.obsidian`), CI (`.github`), and every agent
+        # workspace (`.agent`, `.claude`, `.codex`, `.gemini`, `.kiro`, and the
+        # long tail this project has never heard of). Their Markdown is command
+        # definitions and skill templates whose frontmatter is not note
+        # frontmatter — `argument-hint: [a: b]` is a YAML flow-sequence error and
+        # `title: {{title}}` is an unhashable dict — so scanning them turns a
+        # fail-closed build into a hard stop on files that were never knowledge.
+        # A PARA folder is never named `.something`; drop a `.knowledge-ignore`
+        # marker to exclude a non-dot tree.
+        if any(part.startswith(".") for r in rels for part in r.parts[:-1]):
             continue
         if any(runtime_generated == r or runtime_generated in r.parents for r in rels):
             continue
