@@ -78,8 +78,10 @@ def main() -> int:
     import_okf.add_argument("bundle")
     export_json = sub.add_parser("export-jsonld")
     export_json.add_argument("output")
+    export_json.add_argument("--overwrite", action="store_true")
     export_rdf = sub.add_parser("export-rdf")
     export_rdf.add_argument("output")
+    export_rdf.add_argument("--overwrite", action="store_true")
     migrations = sub.add_parser("plan-migrations")
     migrations.add_argument("from_version")
     migrations.add_argument("--to-version")
@@ -194,9 +196,9 @@ def main() -> int:
         elif args.cmd == "contradictions":
             out = idx.contradiction_candidates()
         elif args.cmd == "export-jsonld":
-            out = export_jsonld(idx, (root / args.output).resolve())
+            out = export_jsonld(idx, (root / args.output).resolve(), args.overwrite)
         elif args.cmd == "export-rdf":
-            out = export_rdf_ntriples(idx, (root / args.output).resolve())
+            out = export_rdf_ntriples(idx, (root / args.output).resolve(), args.overwrite)
         else:
             raise SystemExit(2)
         print(json.dumps(out, indent=2, ensure_ascii=False, default=str))

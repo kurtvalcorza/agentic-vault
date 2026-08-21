@@ -220,9 +220,35 @@ SENSITIVE_OUTPUT_NAMES = {
 }
 
 
-def _reject_unsafe_export_output(output: Path, allowed_suffixes: set[str]) -> None:
+# Ownership markers embedded in graph exports. A matching file extension is NOT
+# proof of ownership, so overwriting an existing output requires one of these
+# markers (or an explicit overwrite opt-in).
+JSONLD_OWNER_MARKER = "agentic-vault-knowledge-jsonld"
+NT_OWNER_MARKER = "# agentic-vault-knowledge n-triples export"
+
+
+def _jsonld_is_owned(output: Path) -> bool:
+    try:
+        data = json.loads(output.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    return isinstance(data, dict) and data.get("@generator") == JSONLD_OWNER_MARKER
+
+
+def _nt_is_owned(output: Path) -> bool:
+    try:
+        with output.open(encoding="utf-8") as handle:
+            first = handle.readline().rstrip("\n")
+    except OSError:
+        return False
+    return first == NT_OWNER_MARKER
+
+
+def _reject_unsafe_export_output(output: Path, is_owned, overwrite: bool = False) -> None:
     """Graph exports must never overwrite canonical notes, protected config,
-    secret files, or any existing file that is not itself an export artifact."""
+    secret files, or ANY existing file that is not a prior agentic-vault export.
+    A matching extension is not ownership evidence; overwriting an existing file
+    requires an exporter ownership marker or an explicit overwrite opt-in."""
     # A symlink output would let write_text() follow the link and overwrite its
     # target (e.g. a link to .env). Reject symlinks and run the path checks
     # against the resolved location, not just the lexical one.
@@ -234,12 +260,15 @@ def _reject_unsafe_export_output(output: Path, allowed_suffixes: set[str]) -> No
         raise ValueError(f"refusing to write a graph export over a Markdown path: {output}")
     if output.name in SENSITIVE_OUTPUT_NAMES:
         raise ValueError(f"refusing to write a graph export over a configuration/secret file: {output}")
-    if output.exists() and output.suffix.lower() not in allowed_suffixes:
-        raise ValueError(f"refusing to overwrite an existing non-export file: {output}")
+    if output.exists() and not overwrite and not is_owned(output):
+        raise ValueError(
+            f"refusing to overwrite an existing file that is not an agentic-vault export: {output} "
+            "(pass overwrite=True to replace it)"
+        )
 
 
-def export_jsonld(index, output: Path) -> dict[str, Any]:
-    _reject_unsafe_export_output(output, {".json", ".jsonld"})
+def export_jsonld(index, output: Path, overwrite: bool = False) -> dict[str, Any]:
+    _reject_unsafe_export_output(output, _jsonld_is_owned, overwrite)
     graph = []
     for row in index.conn.execute("SELECT id,type,title,status FROM objects ORDER BY id"):
         node = {"@id": row["id"], "@type": row["type"], "name": row["title"], "status": row["status"]}
@@ -256,7 +285,11 @@ def export_jsonld(index, output: Path) -> dict[str, Any]:
         if rels:
             node["relations"] = rels
         graph.append(node)
-    data = {"@context": {"name": "https://schema.org/name", "status": "https://schema.org/status"}, "@graph": graph}
+    data = {
+        "@generator": JSONLD_OWNER_MARKER,
+        "@context": {"name": "https://schema.org/name", "status": "https://schema.org/status"},
+        "@graph": graph,
+    }
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     return {"objects": len(graph), "output": str(output)}
@@ -270,13 +303,13 @@ def _literal(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def export_rdf_ntriples(index, output: Path) -> dict[str, Any]:
-    _reject_unsafe_export_output(output, {".nt", ".ntriples"})
+def export_rdf_ntriples(index, output: Path, overwrite: bool = False) -> dict[str, Any]:
+    _reject_unsafe_export_output(output, _nt_is_owned, overwrite)
     rdf_type = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>"
     rdfs_label = "<http://www.w3.org/2000/01/rdf-schema#label>"
     av_status = _urn("property", "status")
     av_derivation = _urn("property", "derivation")
-    lines: list[str] = []
+    lines: list[str] = [NT_OWNER_MARKER]
     for row in index.conn.execute("SELECT id,type,title,status FROM objects ORDER BY id"):
         subject = _urn("object", row["id"])
         lines.append(f"{subject} {rdf_type} {_urn('class', row['type'])} .")
@@ -294,4 +327,5 @@ def export_rdf_ntriples(index, output: Path) -> dict[str, Any]:
         lines.append(f"{edge} {av_derivation} {_literal(rel['derivation'])} .")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
-    return {"triples": len(lines), "output": str(output), "format": "application/n-triples"}
+    # Exclude the leading ownership-marker comment line from the triple count.
+    return {"triples": len(lines) - 1, "output": str(output), "format": "application/n-triples"}

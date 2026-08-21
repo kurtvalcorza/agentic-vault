@@ -1324,3 +1324,37 @@ relations:
 def test_validate_okf_rejects_missing_bundle(tmp_path: Path) -> None:
     issues = validate_okf_bundle(tmp_path / "does-not-exist")
     assert issues and issues[0]["code"] == "missing-bundle"
+
+
+# --- Ninth review pass (head 3905b4c) regression coverage ---
+
+
+def test_graph_export_refuses_unowned_existing_file(vault: Path) -> None:
+    system = vault / "System"
+    system.mkdir(exist_ok=True)
+    target = system / "settings.json"
+    target.write_text('{"unrelated": true}\n', encoding="utf-8")
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        # A matching .json extension is not ownership evidence: refuse + preserve.
+        with pytest.raises(ValueError, match="not an agentic-vault export"):
+            export_jsonld(idx, target)
+        assert '"unrelated": true' in target.read_text(encoding="utf-8")
+        # Explicit overwrite opt-in is honored...
+        export_jsonld(idx, target, overwrite=True)
+        assert "@generator" in target.read_text(encoding="utf-8")
+        # ...and a prior owned export can be re-exported without the opt-in.
+        export_jsonld(idx, target)
+
+
+def test_rdf_export_refuses_unowned_existing_file(vault: Path) -> None:
+    target = vault / "System" / "graph.nt"
+    target.parent.mkdir(exist_ok=True)
+    target.write_text("<urn:foreign> <urn:p> <urn:o> .\n", encoding="utf-8")
+    with RuntimeIndex(_db(vault)) as idx:
+        assert idx.build(vault, _schema(vault)) == []
+        with pytest.raises(ValueError, match="not an agentic-vault export"):
+            export_rdf_ntriples(idx, target)
+        assert "urn:foreign" in target.read_text(encoding="utf-8")
+        export_rdf_ntriples(idx, target, overwrite=True)
+        export_rdf_ntriples(idx, target)  # now owned -> allowed
