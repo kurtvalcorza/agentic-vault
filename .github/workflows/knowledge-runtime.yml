@@ -22,10 +22,24 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Windows is a first-class target: setup.ps1 wires the agent skills
+    # directories together with NTFS junctions, and the runtime's path-safety
+    # rules (symlink escape, vault-root containment) behave differently there.
+    # Testing only on Linux left that platform's behaviour unverified.
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python-version: ['3.10', '3.12', '3.13']
+        include:
+          - os: windows-latest
+            python-version: '3.12'
+    defaults:
+      run:
+        # The install step quotes a POSIX-style extras path; pin bash so the
+        # Windows runner does not reinterpret it under pwsh.
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

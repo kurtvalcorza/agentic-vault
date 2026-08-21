@@ -20,7 +20,34 @@ From the vault root:
 ```bash
 python -m venv .venv
 # activate .venv, then
-pip install -e './.agent/knowledge[test,linkml]'
+python -m pip install -e './.agent/knowledge[test,linkml]'
+```
+
+`python -m pip` rather than bare `pip`: it installs into the interpreter you just
+activated. A bare `pip` resolves through `PATH` and, in an environment that has no
+`pip` of its own, can silently fall through to a global one and install the
+package somewhere you did not intend.
+
+**uv-created venvs ship no `pip` at all**, so the line above fails with
+`No module named pip`. Use uv's installer against the same environment:
+
+```bash
+uv pip install -e './.agent/knowledge[test,linkml]'
+```
+
+Verify with `python -c "import agentic_vault_knowledge"`. If you have the runtime
+installed editable from more than one vault, an `import` resolves to whichever
+one is on `sys.path` first — when running this project's own tests, force the
+working tree:
+
+```bash
+# bash / zsh
+PYTHONPATH=.agent/knowledge pytest .agent/knowledge/tests
+```
+
+```powershell
+# PowerShell — the inline VAR=value prefix is not valid syntax here
+$env:PYTHONPATH = '.agent/knowledge'; pytest .agent/knowledge/tests
 ```
 
 Baseline operation needs no LLM, API key, embeddings, graph server, or remote service. Optional semantic enrichment and retrieval backends implement adapter protocols and return candidates/ranked results; they never become canonical storage.

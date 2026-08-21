@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -1059,8 +1060,12 @@ relations:
         assert "entity:beta" not in targets  # retracted edge stays filtered out
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="POSIX permission bits are not representable on NTFS: os.chmod only "
+    "toggles the read-only attribute, so 0o644 reads back as 0o666.",
+)
 def test_apply_patch_preserves_file_mode(vault: Path) -> None:
-    import os
     import stat as stat_mod
 
     path = vault / "02_Areas/Synthetic/Alpha.md"
